@@ -1,16 +1,20 @@
 // An IDE-style explorer for the space's repository: editor tabs on the left, the file tree on the right.
 // Derived from the Herdr app's `files` mod (Apache-2.0, see LICENSE-Herdr.txt) and modified; see NOTICE.
 import { View, div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, run, appHome, layout, nextCommand, openOverlay, closeOverlay, shared, setShared, props } from "herdr";
+import { v_flex, h_flex, Editor, EditorState, Scrollbar, v_virtual_list, VirtualListScrollHandle, Input, InputState } from "gpui-base";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, run, appHome, layout, nextCommand, openOverlay, shared, setShared, props, notify } from "herdr";
 import * as fs from "fs/promises";
+import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
+import * as ops from "./ops.js";
 
 const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, CACHE = "cache/file-explorer";
-const NAME = "file-explorer", MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
+const MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
 // The settings menu's choice. Shared state rather than config.json: writing a file in the mod
 // folder would hot-reload the explorer and close its tabs.
 const THEME_KEY = `${NAME}.iconTheme`;
 const TREE_WIDTH = 280, NARROW = 368, ROW = 24, PAGE = 10;
+// The key of the row where a new file or folder is named; real paths never hold "//".
+const NEW_ROW = "//new";
 const CONFLICTS = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]), RANK = { U: 1, A: 2, D: 3, M: 4, C: 5 };
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", cjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 const IMAGES = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]);
@@ -141,13 +145,21 @@ async function listFolders(paths, on, windows) {
 
 export default class Explorer extends View {
   init(_props, cx) {
-    // The same mod opened as a popup by the header's gear: it only draws the settings menu.
+    // The same mod opened as an overlay draws only that popup (menus.js).
     const p = props();
     if (p?.menu === "settings") {
-      this.menu = { themes: [], current: p.theme ?? null };
+      this.menu = { kind: "settings", themes: [], current: p.theme ?? null };
       cx.spawn(async cx => { this.menu.themes = await listThemes(); this.menu.current ??= await preferredTheme(); cx.notify(); });
       return;
     }
+    if (p?.menu === "context" || p?.menu === "delete") {
+      this.menu = { kind: p.menu };
+      if (p.menu === "delete") { this.menu.handle = cx.focus_handle(); this.menu.handle.focus(); }
+      return;
+    }
+    // Requests are kept in shared state across restarts: only act on ones made from now on.
+    this.lastRequest = shared(REQUEST)?.id ?? null;
+    this.edit = null;
     this.saved = new Map(); this.roots = new Map(); this.context = null; this.locKey = null; this.wide = null;
     this.h = cx.focus_handle(); this.scroll = VirtualListScrollHandle.new(); this.panelShown = null; this.icons = null;
     this.themeLoading = true;
@@ -372,6 +384,8 @@ export default class Explorer extends View {
   flat() {
     if (this.flatCache?.version === this.version) return this.flatCache.rows;
     const rows = [], walk = (prefix, depth) => {
+      // A new file or folder is named in a row at the top of its folder, as in VS Code.
+      if (this.edit?.kind === "new" && this.edit.parent === prefix) rows.push({ path: `${prefix}${NEW_ROW}`, entry: { name: "", dir: this.edit.dir }, depth, parent: prefix, editing: true });
       for (const entry of this.entries.get(prefix) ?? []) {
         if (rows.length >= TOTAL || depth > 40) return;
         const path = prefix ? `${prefix}/${entry.name}` : entry.name;
@@ -387,7 +401,7 @@ export default class Explorer extends View {
   // on_item_click reports no click count, so a second click on the same row within 400 ms is a double click.
   clicked(path, cx) {
     const row = this.flat().find(r => r.path === path);
-    if (!row) return;
+    if (!row || row.editing || (this.edit?.kind === "rename" && this.edit.rel === path)) return;
     const now = Date.now(), double = this.lastClick?.path === path && now - this.lastClick.at < 400;
     this.lastClick = double ? null : { path, at: now };
     this.h.focus();
@@ -405,6 +419,11 @@ export default class Explorer extends View {
   }
 
   key(e, cx) {
+    // While naming, keys belong to the input; Escape cancels, Enter arrives as its submit.
+    if (this.edit) {
+      if (e.key === "escape") { this.endEdit(cx); cx.stop_propagation(); }
+      return;
+    }
     const rows = this.flat(), i = rows.findIndex(r => r.path === this.selected), row = rows[i];
     let handled = true;
     switch (e.key) {
@@ -424,6 +443,8 @@ export default class Explorer extends View {
       case "enter": if (row) row.entry.dir ? this.toggle(row.path, cx) : this.open(row.path, true, cx); break;
       case "space": if (row && !row.entry.dir) this.open(row.path, false, cx); break;
       case "escape": if (this.terminalPane) run("pane.focus", { pane: this.terminalPane }); break;
+      case "f2": if (row) this.startRename(row.path, cx); break;
+      case "delete": if (row) this.askDelete(row.path, row.entry.dir); break;
       default: handled = this.typeToFind(e, rows, i);
     }
     if (handled) { cx.stop_propagation(); cx.notify(); }
@@ -561,16 +582,152 @@ export default class Explorer extends View {
   }
 
   renderMenu(t) {
-    const { themes, current } = this.menu;
-    return v_flex().id("explorer-menu").size_full().p(6).gap(2).text_size(13).text_color(t.foreground)
-      .child(div().px(8).pt(4).pb(6).text_size(11).font_semibold().text_color(t.muted).child("ICON THEME"))
-      .child(v_flex().id("explorer-menu-themes").flex_1().min_h(0).overflow_y_scroll().gap(2).children(themes.map(th =>
-        h_flex().id(`theme-${th.name}`).h(28).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer()
-          .when(th.name === current, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
-          .on_click(() => { setShared(THEME_KEY, th.name); closeOverlay(props().overlay); })
-          .child(div().w(14).flex_none().text_color(t.accent).child(th.name === current ? "✓" : ""))
-          .child(div().flex_1().min_w(0).truncate().child(th.label)))))
-      .when(!themes.length, el => el.child(div().px(8).text_color(t.dim).child("Loading…")));
+    if (this.menu.kind === "context") return renderContext(props(), t);
+    if (this.menu.kind === "delete") return renderDelete(props(), t, this.menu.handle);
+    return renderSettings(this.menu, t, name => setShared(THEME_KEY, name));
+  }
+
+  // --- File actions (right-click menu, F2, Delete) -----------------------------------
+
+  // What the popups need to know about an entry ("" is the root folder).
+  target(rel, dir) {
+    const context = this.context;
+    return { rel, dir, root: context.root, full: this.join(rel), relative: this.windows() ? rel.replace(/\//g, "\\") : rel, remote: Boolean(context.on) };
+  }
+
+  contextMenu(rel, cx) {
+    if (!this.context || this.edit || rel.endsWith(NEW_ROW)) return;
+    const row = rel ? this.flat().find(r => r.path === rel) : null;
+    if (rel && !row) return;
+    if (rel) this.selected = rel;
+    const p = this.target(rel, row ? row.entry.dir : true);
+    openOverlay({ mod: NAME, kind: "popup", width: 240, height: contextHeight(contextItems(p)), props: { ...p, menu: "context" } });
+    cx.notify();
+  }
+
+  // The popups ask through shared state; act once on each new request for this tree.
+  handleRequest(cx) {
+    const r = shared(REQUEST);
+    if (!r || r.id === this.lastRequest) return;
+    this.lastRequest = r.id;
+    if (!this.context || r.root !== this.context.root || this.context.on) return;
+    // Rendering is no place to change state: act right after. A timer rather than cx.spawn: the
+    // edit schedules its own timer, which a finished task's context drops.
+    cx.timer.after(0, cx => {
+      if (r.action === "open") this.open(r.rel, true, cx);
+      else if (r.action === "rename") this.startRename(r.rel, cx);
+      else if (r.action === "new-file" || r.action === "new-folder") this.startNew(r.folder ?? "", r.action === "new-folder", cx);
+      else if (r.action === "delete") this.remove(r.rel, r.dir, cx);
+      cx.notify();
+    });
+  }
+
+  beginEdit(edit, value, cx) {
+    const input = InputState.new({ value });
+    edit.input = input; edit.error = null; edit.busy = false;
+    input.on("submit", (_e, cx) => this.commitEdit(cx));
+    input.on("change", (_e, cx) => { if (this.edit?.input === input) { this.edit.error = null; cx.notify(); } });
+    // As in VS Code, clicking away keeps the name if it's valid.
+    input.on("blur", (_e, cx) => { if (this.edit?.input === input && !this.edit.busy) this.commitEdit(cx, true); });
+    this.edit = edit;
+    this.version++;
+    // The input exists once the row is drawn; select the name without its extension, like VS Code.
+    cx.timer.after(30, () => {
+      if (this.edit?.input !== input) return;
+      input.focus();
+      const dot = value.lastIndexOf(".");
+      input.set_selected_range({ start: 0, end: !edit.dir && dot > 0 ? dot : value.length });
+    });
+    cx.notify();
+  }
+
+  startRename(rel, cx) {
+    const row = this.flat().find(r => r.path === rel);
+    if (!row || this.context?.on) return;
+    this.selected = rel;
+    this.beginEdit({ kind: "rename", rel, parent: row.parent, dir: row.entry.dir, name: row.entry.name }, row.entry.name, cx);
+  }
+
+  startNew(folder, dir, cx) {
+    if (this.context?.on) return;
+    if (folder && !this.folders.has(folder)) { this.folders.add(folder); this.reload(cx, [folder], false); }
+    this.selected = `${folder}${NEW_ROW}`;
+    this.beginEdit({ kind: "new", parent: folder, dir }, "", cx);
+  }
+
+  endEdit(cx) {
+    this.edit = null;
+    this.version++;
+    this.h.focus();
+    cx.notify();
+  }
+
+  commitEdit(cx, blurred = false) {
+    const edit = this.edit;
+    if (!edit || edit.busy) return;
+    const name = edit.input.value().trim(), context = this.context;
+    // Nothing typed, or the same name: nothing to do.
+    if (!name || (edit.kind === "rename" && name === edit.name)) { this.endEdit(cx); return; }
+    const caseOnly = edit.kind === "rename" && name.toLowerCase() === edit.name.toLowerCase();
+    const fold = s => (this.windows() ? s.toLowerCase() : s);
+    const taken = !caseOnly && (this.entries.get(edit.parent) ?? []).some(e => fold(e.name) === fold(name));
+    const error = ops.invalidName(name) ?? (taken ? `“${name}” already exists here` : null);
+    if (error) {
+      // Leaving the field with a bad name drops the edit; Enter keeps it open to fix.
+      if (blurred) { this.endEdit(cx); return; }
+      edit.error = error; cx.notify(); return;
+    }
+    edit.busy = true;
+    const rel = edit.parent ? `${edit.parent}/${name}` : name;
+    cx.spawn(async cx => {
+      try {
+        if (edit.kind === "rename") await ops.rename(this.join(edit.rel, context), name);
+        else if (edit.dir) await ops.createFolder(this.join(rel, context));
+        else await ops.createFile(this.join(rel, context));
+      } catch (e) {
+        if (this.edit === edit) { edit.busy = false; edit.error = String(e?.message ?? e); cx.notify(); }
+        return;
+      }
+      if (this.context !== context) return;
+      if (edit.kind === "rename") this.moved(edit.rel, rel);
+      this.edit = null;
+      this.selected = rel;
+      this.version++;
+      this.reload(cx, [edit.parent], true);
+      if (edit.kind === "new" && !edit.dir) this.open(rel, true, cx);
+      this.h.focus();
+      cx.notify();
+    });
+  }
+
+  // A rename moves everything under the old path: open tabs, expanded folders.
+  moved(from, to) {
+    const map = p => (p === from ? to : p.startsWith(from + "/") ? to + p.slice(from.length) : p);
+    for (const tab of this.tabs) { const next = map(tab.rel); if (next !== tab.rel) { this.drop(tab.rel); tab.rel = next; } }
+    if (this.active) this.active = map(this.active);
+    this.folders = new Set([...this.folders].map(map));
+    for (const key of [...this.entries.keys()]) if (map(key) !== key) this.entries.delete(key);
+  }
+
+  askDelete(rel, dir) {
+    if (!this.context || this.context.on || !rel) return;
+    openDeleteDialog(this.target(rel, dir));
+  }
+
+  remove(rel, dir, cx) {
+    const context = this.context, parent = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+    cx.spawn(async cx => {
+      try { await ops.trash(this.join(rel, context), dir); }
+      catch (e) { notify({ title: `Couldn't delete ${rel.slice(rel.lastIndexOf("/") + 1)}`, body: String(e?.message ?? e), level: "error" }); return; }
+      if (this.context !== context) return;
+      const gone = p => p === rel || p.startsWith(rel + "/");
+      for (const tab of [...this.tabs]) if (gone(tab.rel)) this.closeTab(tab.rel, cx);
+      this.folders = new Set([...this.folders].filter(f => !gone(f)));
+      if (this.selected && gone(this.selected)) this.selected = parent || null;
+      this.version++;
+      this.reload(cx, [parent], true);
+      cx.notify();
+    });
   }
 
   // --- Drawing -----------------------------------------------------------------------
@@ -582,8 +739,11 @@ export default class Explorer extends View {
     return icon.image ? image(icon.image).size(size).flex_none() : svg(icon.glyph).size(size).flex_none().text_color(icon.color ?? t.muted);
   }
 
-  row({ path, entry, depth }, t, focused) {
-    const open = this.folders.has(path), selected = this.selected === path, icon = this.icon(entry.name, entry.dir, open, 16, t);
+  row({ path, entry, depth, editing }, t, focused) {
+    const naming = editing || (this.edit?.kind === "rename" && this.edit.rel === path);
+    // A new entry's icon follows the name being typed.
+    const shownName = editing ? this.edit.input.value() || (entry.dir ? "folder" : "file") : entry.name;
+    const open = this.folders.has(path), selected = this.selected === path, icon = this.icon(shownName, entry.dir, open, 16, t);
     const mark = entry.dir ? this.folderMarks[path] : this.marks[path], ignored = !mark && this.isIgnored(path);
     const color = ignored ? t.dim : this.markColor(mark, t, t.foreground);
     // Rows are drawn during layout, where handlers throw: clicks arrive through the list's on_item_click.
@@ -597,7 +757,11 @@ export default class Explorer extends View {
       // Folders get arrows, as in VS Code; a theme without folder icons (Seti) shows only the arrow.
       .child(entry.dir ? svg(`${MOD}/ui/chevron-${open ? "down" : "right"}.svg`).size(14).flex_none().text_color(t.muted) : div().w(14).flex_none())
       .when(Boolean(icon), el => el.child(ignored ? icon.opacity(0.5) : icon))
-      .child(div().flex_1().min_w(0).truncate().text_color(color).child(entry.name))
+      .child(naming
+        // The input belongs to the edit (made outside this renderer, where state can't be created).
+        ? Input.new(this.edit.input).flex_1().min_w(0).h(20).px(4).rounded(3).border_1()
+          .border_color(this.edit.error ? t.ansi1 : t.accent).bg(t.background).text_color(t.foreground)
+        : div().flex_1().min_w(0).truncate().text_color(color).child(entry.name))
       // VS Code marks files with a letter and folders holding changes with a dot.
       .when(Boolean(mark), el => el.child(div().flex_none().text_size(11).text_color(color).child(entry.dir ? "●" : mark)));
   }
@@ -615,13 +779,19 @@ export default class Explorer extends View {
         .child(div().id("explorer-settings").w(24).h(24).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
           .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => this.openSettings()).child(svg(`${MOD}/ui/settings.svg`).size(14))))
-      .when(rows.length > 0, el => el.child(div().flex_1().min_h(0).relative().pt(4)
+      .when(rows.length > 0, el => el.child(div().id("explorer-tree-area").flex_1().min_h(0).relative().pt(4)
+        // A right-click on a row reaches the row's handler first, then this one: only empty space means the root.
+        .on_mouse_down("right", (_e, cx) => { if (Date.now() - (this.rowMenuAt ?? 0) > 100) this.contextMenu("", cx); })
         // Only the rows on screen are built, so a large repository stays smooth.
         .child(v_virtual_list("explorer-tree", rows.length, ROW, i => rows[i]?.path ?? String(i),
           range => rows.slice(range.start, range.end).map(r => this.row(r, t, focused)))
-          .on_item_click((path, cx) => this.clicked(path, cx)).track_scroll(this.scroll).size_full())
+          .on_item_click((path, cx) => this.clicked(path, cx))
+          .on_item_secondary_click((path, _e, cx) => { this.rowMenuAt = Date.now(); this.contextMenu(path, cx); })
+          .track_scroll(this.scroll).size_full())
         .child(Scrollbar.vertical("explorer-tree").viewport_from_layout().absolute().inset_0())))
-      .when(Boolean(this.error) || !rows.length, el => el.child(div().p(12).text_size(12).text_color(t.dim).child(empty)))
+      .when(Boolean(this.edit?.error), el => el.child(div().px(12).py(6).flex_none().text_size(12).text_color(t.ansi1).border_t(1).border_color(t.border).child(this.edit.error)))
+      .when(Boolean(this.error) || !rows.length, el => el.child(div().id("explorer-empty").p(12).text_size(12).text_color(t.dim)
+        .on_mouse_down("right", (_e, cx) => this.contextMenu("", cx)).child(empty)))
       .when(this.limited, el => el.child(div().px(12).py(6).flex_none().text_size(11).text_color(t.dim).child(`Some folders show only their first ${PER_FOLDER} entries`)));
   }
 
@@ -663,6 +833,7 @@ export default class Explorer extends View {
     if (this.menu) return this.renderMenu(theme());
     this.sync(cx);
     this.followTheme(cx);
+    this.handleRequest(cx);
     // ctrl-shift-e shows the panel; give the tree the keyboard as it appears. The tab bar also
     // reopens it after a space switch, which must leave the keyboard in the terminal.
     const panel = findNode(layout(), "panel"), shown = Boolean(panel && !panel.hidden);
