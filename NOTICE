@@ -1,0 +1,32 @@
+Herdr File Explorer
+Copyright (c) 2026 Pascal T. Licensed under the MIT License (LICENSE), except for
+the third-party parts below, which keep their own licenses.
+
+mods/file-explorer/main.js
+  Derived from the `files` mod shipped with the Herdr app
+  (https://github.com/herdrdev/herdr-app, defaults/mods/files), licensed under the
+  Apache License 2.0 (mods/file-explorer/LICENSE-Herdr.txt). Changed for this project:
+  repository-rooted tree with batched listing, prefetching and change batching,
+  icon themes, editor tabs with previews, keyboard navigation and a virtual list.
+  The parts derived from Herdr remain under the Apache License 2.0.
+
+mods/file-explorer/ui/chevron-*.svg
+  Lucide icons (https://lucide.dev), ISC License (mods/file-explorer/ui/LICENSE-Lucide.txt),
+  as shipped with Herdr's mods.
+
+mods/file-explorer/icon-themes/seti/
+  Seti UI icons by Jesse Weed (https://github.com/jesseweed/seti-ui), MIT License,
+  as shipped in VS Code's theme-seti extension
+  (mods/file-explorer/icon-themes/seti/LICENSE-seti.txt). The icon font's glyphs were
+  converted to SVG by scripts/build-icon-themes.py.
+
+mods/file-explorer/icon-themes/material/
+  Material Icon Theme (https://github.com/material-extensions/vscode-material-icon-theme),
+  MIT License (mods/file-explorer/icon-themes/material/LICENSE-material-icon-theme.txt).
+
+mods/file-explorer/icon-themes/languages.json
+  Built from the language contributions of Visual Studio Code's built-in extensions
+  (https://github.com/microsoft/vscode), MIT License
+  (mods/file-explorer/icon-themes/LICENSE-vscode.txt).
+
+Source versions: mods/file-explorer/icon-themes/versions.json.
