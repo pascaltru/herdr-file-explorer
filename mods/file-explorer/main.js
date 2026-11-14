@@ -11,6 +11,7 @@ const NAME = "file-explorer", MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes
 // folder would hot-reload the explorer and close its tabs.
 const THEME_KEY = `${NAME}.iconTheme`;
 const TREE_WIDTH = 280, NARROW = 368, ROW = 24, PAGE = 10;
+const CONFLICTS = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]), RANK = { U: 1, A: 2, D: 3, M: 4, C: 5 };
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", cjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 const IMAGES = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]);
 
@@ -160,7 +161,7 @@ export default class Explorer extends View {
   }
 
   reset(saved) {
-    this.entries = saved?.entries ?? new Map(); this.folders = saved?.folders ?? new Set(); this.marks = saved?.marks ?? {};
+    this.entries = saved?.entries ?? new Map(); this.folders = saved?.folders ?? new Set(); this.marks = saved?.marks ?? {}; this.folderMarks = saved?.folderMarks ?? {}; this.ignored = saved?.ignored ?? new Set(); this.ignoredCache = new Map();
     this.selected = saved?.selected ?? null; this.tabs = saved?.tabs ?? []; this.active = saved?.active ?? null;
     this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.limited = false;
     this.version++;
@@ -209,7 +210,7 @@ export default class Explorer extends View {
     if (old && old.root === root && old.on === on) return;
     if (old) {
       for (const view of this.views.values()) this.release(view);
-      this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, selected: this.selected, tabs: this.tabs, active: this.active });
+      this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, selected: this.selected, tabs: this.tabs, active: this.active });
     }
     if (!root) { this.context = null; this.reset(); this.fit(); return; }
     this.reset(this.saved.get(`${on ?? ""}|${root}`));
@@ -318,16 +319,38 @@ export default class Explorer extends View {
     this.version++;
   }
 
+  // VS Code's letters: U untracked, A added, M modified, D deleted, C conflict. Folders take the
+  // most important mark below them; ignored entries (--ignored=matching lists a folder once) are dimmed.
   async status(context) {
-    const marks = {};
+    const marks = {}, folders = {}, ignored = new Set();
     // Writes nothing under .git (index lock, fsmonitor cookie): the folder watch would refresh again.
-    const r = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"], { cwd: context.root, on: context.on }).catch(() => null);
+    const r = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--ignored=matching"], { cwd: context.root, on: context.on }).catch(() => null);
     // The root is the repository's top level, so git's paths are already relative to it.
     if (r?.code === 0) for (const entry of r.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
-      const xy = entry.slice(0, 2);
-      marks[entry.slice(3)] = xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
+      const xy = entry.slice(0, 2), path = entry.slice(3).replace(/\/$/, "");
+      if (xy === "!!") { ignored.add(path); continue; }
+      const mark = CONFLICTS.has(xy) ? "C" : xy === "??" ? "U" : xy.includes("A") ? "A" : xy.includes("D") ? "D" : "M";
+      marks[path] = mark;
+      for (let i = path.lastIndexOf("/"); i > 0; i = path.lastIndexOf("/", i - 1)) {
+        const folder = path.slice(0, i);
+        if (RANK[mark] > (RANK[folders[folder]] ?? 0)) folders[folder] = mark;
+      }
     }
-    if (this.context === context) this.marks = marks;
+    if (this.context === context) { this.marks = marks; this.folderMarks = folders; this.ignored = ignored; this.ignoredCache = new Map(); }
+  }
+
+  isIgnored(path) {
+    if (!this.ignored.size) return false;
+    if (this.ignoredCache.has(path)) return this.ignoredCache.get(path);
+    const slash = path.lastIndexOf("/");
+    const result = this.ignored.has(path) || (slash > 0 && this.isIgnored(path.slice(0, slash)));
+    this.ignoredCache.set(path, result);
+    return result;
+  }
+
+  markColor(mark, t, fallback) {
+    // VS Code's hues from the theme: green new, red deleted or conflicted, yellow modified.
+    return mark === "U" || mark === "A" ? t.ansi2 : mark === "D" || mark === "C" ? t.ansi1 : mark === "M" ? t.ansi3 : fallback;
   }
 
   // --- Tree actions ------------------------------------------------------------------
@@ -560,17 +583,23 @@ export default class Explorer extends View {
   }
 
   row({ path, entry, depth }, t, focused) {
-    const open = this.folders.has(path), mark = this.marks[path], selected = this.selected === path, icon = this.icon(entry.name, entry.dir, open, 16, t);
-    const color = mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : mark === "M" ? t.blocked : t.foreground;
+    const open = this.folders.has(path), selected = this.selected === path, icon = this.icon(entry.name, entry.dir, open, 16, t);
+    const mark = entry.dir ? this.folderMarks[path] : this.marks[path], ignored = !mark && this.isIgnored(path);
+    const color = ignored ? t.dim : this.markColor(mark, t, t.foreground);
     // Rows are drawn during layout, where handlers throw: clicks arrive through the list's on_item_click.
-    return h_flex().h(ROW).flex_none().mx(4).pl(4 + depth * 16).pr(8).gap(4).items_center().rounded(5).cursor_pointer()
+    // Indent guides: one line per ancestor level, through each folder's arrow column.
+    const guides = [];
+    for (let level = 0; level < depth; level++) guides.push(div().absolute().top(0).bottom(0).left(4 + level * 16 + 6).w(1).bg(t.border));
+    return h_flex().h(ROW).flex_none().mx(4).pl(4 + depth * 16).pr(8).gap(4).items_center().rounded(5).cursor_pointer().relative()
       .border_1().border_color(selected && focused ? t.accent : "#00000000")
       .when(selected, el => el.bg(t.selected)).hover(s => s.bg(selected ? t.selected : t.hover))
+      .children(guides)
       // Folders get arrows, as in VS Code; a theme without folder icons (Seti) shows only the arrow.
       .child(entry.dir ? svg(`${MOD}/ui/chevron-${open ? "down" : "right"}.svg`).size(14).flex_none().text_color(t.muted) : div().w(14).flex_none())
-      .when(Boolean(icon), el => el.child(icon))
+      .when(Boolean(icon), el => el.child(ignored ? icon.opacity(0.5) : icon))
       .child(div().flex_1().min_w(0).truncate().text_color(color).child(entry.name))
-      .when(Boolean(mark), el => el.child(div().flex_none().text_size(11).text_color(color).child(mark)));
+      // VS Code marks files with a letter and folders holding changes with a dot.
+      .when(Boolean(mark), el => el.child(div().flex_none().text_size(11).text_color(color).child(entry.dir ? "●" : mark)));
   }
 
   tree(t) {
@@ -599,7 +628,7 @@ export default class Explorer extends View {
   editor(t, cx) {
     const tabs = this.tabs.map(tab => {
       const on = tab.rel === this.active, mark = this.marks[tab.rel];
-      const color = mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : mark === "M" ? t.blocked : on ? t.foreground : t.muted;
+      const color = this.markColor(mark, t, on ? t.foreground : t.muted);
       return h_flex().id(`tab-${tab.rel}`).h_full().flex_none().pl(10).pr(6).gap(6).items_center().cursor_pointer()
         .border_r(1).border_color(t.border).bg(on ? t.background : t.chrome).hover(s => s.bg(on ? t.background : t.hover))
         .on_click((e, cx) => { this.active = tab.rel; if (e.click_count >= 2) tab.preview = false; cx.notify(); })
