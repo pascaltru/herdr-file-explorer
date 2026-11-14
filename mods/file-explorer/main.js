@@ -7,7 +7,7 @@ import * as fs from "fs/promises";
 import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
 import * as ops from "./ops.js";
 
-const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, CACHE = "cache/file-explorer";
+const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CACHE = "cache/file-explorer";
 const MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
 // The settings menu's choice. Shared state rather than config.json: writing a file in the mod
 // folder would hot-reload the explorer and close its tabs.
@@ -174,6 +174,7 @@ export default class Explorer extends View {
 
   reset(saved) {
     this.entries = saved?.entries ?? new Map(); this.folders = saved?.folders ?? new Set(); this.marks = saved?.marks ?? {}; this.folderMarks = saved?.folderMarks ?? {}; this.ignored = saved?.ignored ?? new Set(); this.ignoredCache = new Map();
+    this.ignoredEntries = saved?.ignoredEntries ?? []; this.lazy = saved?.lazy ?? new Set();
     this.selected = saved?.selected ?? null; this.tabs = saved?.tabs ?? []; this.active = saved?.active ?? null;
     this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.limited = false;
     this.version++;
@@ -222,7 +223,7 @@ export default class Explorer extends View {
     if (old && old.root === root && old.on === on) return;
     if (old) {
       for (const view of this.views.values()) this.release(view);
-      this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, selected: this.selected, tabs: this.tabs, active: this.active });
+      this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active });
     }
     if (!root) { this.context = null; this.reset(); this.fit(); return; }
     this.reset(this.saved.get(`${on ?? ""}|${root}`));
@@ -291,9 +292,17 @@ export default class Explorer extends View {
       try {
         while (context.want && this.context === context) {
           const w = context.want; context.want = null;
-          const rels = w.all ? ["", ...this.folders] : [...w.dirs].filter(d => d === "" || this.entries.has(d) || this.folders.has(d));
-          if (rels.length) await this.load(rels, context);
-          if (w.git && this.context === context) await this.status(context);
+          let rels = w.all ? ["", ...this.folders] : [...w.dirs].filter(d => d === "" || this.entries.has(d) || this.folders.has(d));
+          if (context.repo) {
+            // git lists the whole repository in one quick call; only the folders it leaves out
+            // (ignored, untracked) are read from disk, which on Windows means starting PowerShell.
+            if (w.all || w.git) { await this.status(context); if (this.context === context) await this.gitTree(context); }
+            rels = rels.filter(r => this.isLazy(r));
+            if (rels.length && this.context === context) await this.load(rels, context);
+          } else {
+            if (rels.length) await this.load(rels, context);
+            if (w.git && this.context === context) await this.status(context);
+          }
           if (this.context === context) this.error = null;
           cx.notify();
           // Read one level ahead, so opening a folder shows its contents at once.
@@ -333,14 +342,68 @@ export default class Explorer extends View {
 
   // VS Code's letters: U untracked, A added, M modified, D deleted, C conflict. Folders take the
   // most important mark below them; ignored entries (--ignored=matching lists a folder once) are dimmed.
+  // The repository's tree from `git ls-files`: tracked files (less those deleted on disk) and untracked
+  // ones. A folder git doesn't list inside (an untracked folder, an ignored one from git status) is
+  // "lazy": shown, and read from disk when opened.
+  async gitTree(context) {
+    const r = await exec("git", ["--no-optional-locks", "ls-files", "-z", "-t", "-c", "-d", "-o", "--exclude-standard", "--directory"], { cwd: context.root, on: context.on, timeout: 60000 });
+    if (r.code !== 0) throw new Error(r.stderr || "git ls-files failed");
+    const items = r.stdout.split("\0"), removed = new Set();
+    // -t tags each path: H tracked, R deleted on disk, S not checked out (sparse), ? untracked.
+    for (const item of items) if (item.startsWith("R ")) removed.add(item.slice(2));
+    const tree = new Map([["", new Map()]]), lazy = new Set();
+    const add = (path, dir) => {
+      const parts = path.split("/");
+      let parent = "";
+      for (let i = 0; i < parts.length; i++) {
+        const last = i === parts.length - 1, rel = parent ? `${parent}/${parts[i]}` : parts[i];
+        const siblings = tree.get(parent) ?? tree.set(parent, new Map()).get(parent);
+        siblings.set(parts[i], last ? dir || siblings.get(parts[i]) === true : true);
+        if (!last && !tree.has(rel)) tree.set(rel, new Map());
+        parent = rel;
+      }
+    };
+    let count = 0;
+    for (const item of items) {
+      if (!item || item.startsWith("R ") || item.startsWith("S ") || ++count > MAX_GIT_PATHS) continue;
+      const path = item.slice(2);
+      if (removed.has(path)) continue;
+      if (path.endsWith("/")) { add(path.slice(0, -1), true); lazy.add(path.slice(0, -1)); }
+      else add(path, false);
+    }
+    for (const { path, dir } of this.ignoredEntries) { add(path, dir); if (dir) lazy.add(path); }
+    if (this.context !== context) return;
+    const entries = new Map();
+    let limited = count > MAX_GIT_PATHS;
+    for (const [folder, names] of tree) {
+      // A lazy folder's contents were never listed by git: leave it for the disk.
+      if (lazy.has(folder)) continue;
+      const list = [...names].map(([name, dir]) => ({ name, dir }));
+      if (list.length > PER_FOLDER) limited = true;
+      entries.set(folder, list.slice(0, PER_FOLDER).sort((a, b) => Number(b.dir) - Number(a.dir) || natural(a.name, b.name)));
+    }
+    this.lazy = lazy;
+    // Keep what was already read from disk for lazy folders (an opened node_modules).
+    for (const [folder, list] of this.entries) if (!entries.has(folder) && this.isLazy(folder)) entries.set(folder, list);
+    this.entries = entries;
+    this.limited = limited;
+    this.version++;
+  }
+
+  isLazy(rel) {
+    for (let path = rel; path; path = path.slice(0, Math.max(path.lastIndexOf("/"), 0))) if (this.lazy.has(path)) return true;
+    return false;
+  }
+
   async status(context) {
-    const marks = {}, folders = {}, ignored = new Set();
+    const marks = {}, folders = {}, ignored = new Set(), ignoredEntries = [];
     // Writes nothing under .git (index lock, fsmonitor cookie): the folder watch would refresh again.
     const r = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--ignored=matching"], { cwd: context.root, on: context.on }).catch(() => null);
     // The root is the repository's top level, so git's paths are already relative to it.
     if (r?.code === 0) for (const entry of r.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
       const xy = entry.slice(0, 2), path = entry.slice(3).replace(/\/$/, "");
-      if (xy === "!!") { ignored.add(path); continue; }
+      // --ignored=matching names an ignored folder once, with a trailing slash.
+      if (xy === "!!") { ignored.add(path); ignoredEntries.push({ path, dir: entry.endsWith("/") }); continue; }
       const mark = CONFLICTS.has(xy) ? "C" : xy === "??" ? "U" : xy.includes("A") ? "A" : xy.includes("D") ? "D" : "M";
       marks[path] = mark;
       for (let i = path.lastIndexOf("/"); i > 0; i = path.lastIndexOf("/", i - 1)) {
@@ -348,7 +411,7 @@ export default class Explorer extends View {
         if (RANK[mark] > (RANK[folders[folder]] ?? 0)) folders[folder] = mark;
       }
     }
-    if (this.context === context) { this.marks = marks; this.folderMarks = folders; this.ignored = ignored; this.ignoredCache = new Map(); }
+    if (this.context === context) { this.marks = marks; this.folderMarks = folders; this.ignored = ignored; this.ignoredEntries = ignoredEntries; this.ignoredCache = new Map(); }
   }
 
   isIgnored(path) {
