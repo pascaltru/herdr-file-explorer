@@ -678,35 +678,62 @@ export default class Explorer extends View {
       edit.error = error; cx.notify(); return;
     }
     edit.busy = true;
-    const rel = edit.parent ? `${edit.parent}/${name}` : name;
+    const parent = edit.parent, rel = parent ? `${parent}/${name}` : name, before = [...(this.entries.get(parent) ?? [])];
+    // Show the result at once: on Windows each operation starts PowerShell, about 0.3 s.
+    if (edit.kind === "rename") { this.setEntries(parent, before.map(e => (e.name === edit.name ? { ...e, name } : e))); this.moved(edit.rel, rel); }
+    else if (edit.dir) this.setEntries(parent, [...before, { name, dir: true }]);
+    this.edit = null;
+    this.selected = rel;
+    this.version++;
+    this.h.focus();
+    cx.notify();
     cx.spawn(async cx => {
       try {
         if (edit.kind === "rename") await ops.rename(this.join(edit.rel, context), name);
         else if (edit.dir) await ops.createFolder(this.join(rel, context));
         else await ops.createFile(this.join(rel, context));
       } catch (e) {
-        if (this.edit === edit) { edit.busy = false; edit.error = String(e?.message ?? e); cx.notify(); }
+        if (this.context !== context) return;
+        // Undo the early update and say why.
+        if (edit.kind === "rename") this.moved(rel, edit.rel);
+        this.setEntries(parent, before);
+        this.selected = edit.kind === "rename" ? edit.rel : parent || null;
+        notify({ title: edit.kind === "rename" ? `Couldn't rename ${edit.name}` : `Couldn't create ${name}`, body: String(e?.message ?? e), level: "error" });
+        cx.notify();
         return;
       }
       if (this.context !== context) return;
-      if (edit.kind === "rename") this.moved(edit.rel, rel);
-      this.edit = null;
-      this.selected = rel;
-      this.version++;
-      this.reload(cx, [edit.parent], true);
-      if (edit.kind === "new" && !edit.dir) this.open(rel, true, cx);
-      this.h.focus();
+      // A new file exists now (writeTextFile is quick): list and open it.
+      if (edit.kind === "new" && !edit.dir) {
+        this.setEntries(parent, [...(this.entries.get(parent) ?? []).filter(e => e.name !== name), { name, dir: false }]);
+        this.open(rel, true, cx);
+      }
+      this.refreshAfter(cx, parent, context);
       cx.notify();
     });
   }
 
-  // A rename moves everything under the old path: open tabs, expanded folders.
+  // Changes a folder's listing in place, in the tree's order.
+  setEntries(parent, list) {
+    this.entries.set(parent, list.sort((a, b) => Number(b.dir) - Number(a.dir) || natural(a.name, b.name)));
+    this.version++;
+  }
+
+  // After a change made here: git colors now. A watched tree's listing follows from the folder watch,
+  // so it isn't read twice; an unwatched one (outside a repository, another machine) is read now.
+  refreshAfter(cx, parent, context) {
+    this.reload(cx, context.repo && !context.on && !context.poll ? [] : [parent], true);
+  }
+
+  // A rename moves everything under the old path: open tabs, expanded folders and loaded listings,
+  // so a renamed folder keeps showing its contents.
   moved(from, to) {
     const map = p => (p === from ? to : p.startsWith(from + "/") ? to + p.slice(from.length) : p);
     for (const tab of this.tabs) { const next = map(tab.rel); if (next !== tab.rel) { this.drop(tab.rel); tab.rel = next; } }
     if (this.active) this.active = map(this.active);
     this.folders = new Set([...this.folders].map(map));
-    for (const key of [...this.entries.keys()]) if (map(key) !== key) this.entries.delete(key);
+    this.entries = new Map([...this.entries].map(([key, list]) => [map(key), list]));
+    this.version++;
   }
 
   askDelete(rel, dir) {
@@ -716,16 +743,22 @@ export default class Explorer extends View {
 
   remove(rel, dir, cx) {
     const context = this.context, parent = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+    const name = base(rel), before = [...(this.entries.get(parent) ?? [])], gone = p => p === rel || p.startsWith(rel + "/");
+    // Off the tree at once; the Recycle Bin move runs behind it.
+    this.setEntries(parent, before.filter(e => e.name !== name));
+    for (const tab of [...this.tabs]) if (gone(tab.rel)) this.closeTab(tab.rel, cx);
+    this.folders = new Set([...this.folders].filter(f => !gone(f)));
+    if (this.selected && gone(this.selected)) this.selected = parent || null;
+    cx.notify();
     cx.spawn(async cx => {
       try { await ops.trash(this.join(rel, context), dir); }
-      catch (e) { notify({ title: `Couldn't delete ${rel.slice(rel.lastIndexOf("/") + 1)}`, body: String(e?.message ?? e), level: "error" }); return; }
+      catch (e) {
+        if (this.context === context) { this.setEntries(parent, before); cx.notify(); }
+        notify({ title: `Couldn't delete ${name}`, body: String(e?.message ?? e), level: "error" });
+        return;
+      }
       if (this.context !== context) return;
-      const gone = p => p === rel || p.startsWith(rel + "/");
-      for (const tab of [...this.tabs]) if (gone(tab.rel)) this.closeTab(tab.rel, cx);
-      this.folders = new Set([...this.folders].filter(f => !gone(f)));
-      if (this.selected && gone(this.selected)) this.selected = parent || null;
-      this.version++;
-      this.reload(cx, [parent], true);
+      this.refreshAfter(cx, parent, context);
       cx.notify();
     });
   }
