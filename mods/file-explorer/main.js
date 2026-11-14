@@ -2,11 +2,14 @@
 // Derived from the Herdr app's `files` mod (Apache-2.0, see LICENSE-Herdr.txt) and modified; see NOTICE.
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, run, appHome, layout, nextCommand } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, run, appHome, layout, nextCommand, openOverlay, closeOverlay, shared, setShared, props } from "herdr";
 import * as fs from "fs/promises";
 
 const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, CACHE = "cache/file-explorer";
-const MOD = "mods/file-explorer", THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
+const NAME = "file-explorer", MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
+// The settings menu's choice. Shared state rather than config.json: writing a file in the mod
+// folder would hot-reload the explorer and close its tabs.
+const THEME_KEY = `${NAME}.iconTheme`;
 const TREE_WIDTH = 280, NARROW = 368, ROW = 24, PAGE = 10;
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", cjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 const IMAGES = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]);
@@ -33,11 +36,28 @@ function findNode(node, id) {
   return null;
 }
 
-// The icon theme named in config.json (icon-themes/<name>/theme.json), with VS Code's language table.
-async function loadIconTheme() {
-  const read = async path => JSON.parse(await fs.readFile(`${appHome()}/${path}`, "utf8"));
-  let name = DEFAULT_THEME;
-  try { name = (await read(`${MOD}/config.json`)).iconTheme || name; } catch {}
+const readJson = async path => JSON.parse(await fs.readFile(`${appHome()}/${path}`, "utf8"));
+
+// The menu's choice, else the install's (config.json), else Seti.
+async function preferredTheme() {
+  const chosen = shared(THEME_KEY);
+  if (typeof chosen === "string" && chosen) return chosen;
+  try { return (await readJson(`${MOD}/config.json`)).iconTheme || DEFAULT_THEME; } catch { return DEFAULT_THEME; }
+}
+
+// The installed themes: every icon-themes/<name>/theme.json, with its label.
+async function listThemes() {
+  const out = [];
+  for (const dir of await fs.readdir(`${appHome()}/${THEMES}`, { withFileTypes: true }).catch(() => [])) {
+    if (!dir.isDirectory()) continue;
+    try { out.push({ name: dir.name, label: (await readJson(`${THEMES}/${dir.name}/theme.json`)).label || dir.name }); } catch {}
+  }
+  return out.sort((a, b) => (a.name === DEFAULT_THEME ? -1 : b.name === DEFAULT_THEME ? 1 : a.label.localeCompare(b.label)));
+}
+
+// The icon theme (icon-themes/<name>/theme.json), with VS Code's language table.
+async function loadIconTheme(name) {
+  const read = readJson;
   const languages = await read(`${THEMES}/languages.json`).catch(() => ({ extensions: {}, fileNames: {} }));
   for (const candidate of [name, DEFAULT_THEME]) {
     try { return { name: candidate, base: `${THEMES}/${candidate}/`, theme: await read(`${THEMES}/${candidate}/theme.json`), languages, cache: new Map() }; }
@@ -120,9 +140,17 @@ async function listFolders(paths, on, windows) {
 
 export default class Explorer extends View {
   init(_props, cx) {
+    // The same mod opened as a popup by the header's gear: it only draws the settings menu.
+    const p = props();
+    if (p?.menu === "settings") {
+      this.menu = { themes: [], current: p.theme ?? null };
+      cx.spawn(async cx => { this.menu.themes = await listThemes(); this.menu.current ??= await preferredTheme(); cx.notify(); });
+      return;
+    }
     this.saved = new Map(); this.roots = new Map(); this.context = null; this.locKey = null; this.wide = null;
     this.h = cx.focus_handle(); this.scroll = VirtualListScrollHandle.new(); this.panelShown = null; this.icons = null;
-    cx.spawn(async cx => { this.icons = await loadIconTheme(); cx.notify(); });
+    this.themeLoading = true;
+    cx.spawn(async cx => { this.icons = await loadIconTheme(await preferredTheme()); this.themeLoading = false; cx.notify(); });
     this.version = 0; this.flatCache = null; this.typed = ""; this.typedAt = 0; this.terminalPane = null;
     this.reset();
     // Remote spaces can't be watched, and a failed watch falls back to polling.
@@ -485,7 +513,41 @@ export default class Explorer extends View {
   }
 
   async close() {
-    for (const view of this.views.values()) this.release(view);
+    for (const view of this.views?.values() ?? []) this.release(view);
+  }
+
+  // --- Settings ----------------------------------------------------------------------
+
+  openSettings() {
+    // Sized for two themes; the list scrolls if more are installed.
+    openOverlay({ mod: NAME, kind: "popup", width: 260, height: 112, props: { menu: "settings", theme: this.icons?.name ?? null } });
+  }
+
+  // A theme picked in the menu: load it in place, keeping tabs and folders.
+  followTheme(cx) {
+    const want = shared(THEME_KEY);
+    // A theme that fails to load falls back to Seti; try each choice once rather than on every render.
+    if (typeof want !== "string" || !want || this.themeLoading || want === this.icons?.name || want === this.themeTried) return;
+    this.themeLoading = true; this.themeTried = want;
+    cx.spawn(async cx => {
+      const icons = await loadIconTheme(want);
+      if (icons) this.icons = icons;
+      this.themeLoading = false;
+      cx.notify();
+    });
+  }
+
+  renderMenu(t) {
+    const { themes, current } = this.menu;
+    return v_flex().id("explorer-menu").size_full().p(6).gap(2).text_size(13).text_color(t.foreground)
+      .child(div().px(8).pt(4).pb(6).text_size(11).font_semibold().text_color(t.muted).child("ICON THEME"))
+      .child(v_flex().id("explorer-menu-themes").flex_1().min_h(0).overflow_y_scroll().gap(2).children(themes.map(th =>
+        h_flex().id(`theme-${th.name}`).h(28).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer()
+          .when(th.name === current, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
+          .on_click(() => { setShared(THEME_KEY, th.name); closeOverlay(props().overlay); })
+          .child(div().w(14).flex_none().text_color(t.accent).child(th.name === current ? "✓" : ""))
+          .child(div().flex_1().min_w(0).truncate().child(th.label)))))
+      .when(!themes.length, el => el.child(div().px(8).text_color(t.dim).child("Loading…")));
   }
 
   // --- Drawing -----------------------------------------------------------------------
@@ -520,7 +582,10 @@ export default class Explorer extends View {
       .when(this.tabs.length > 0, el => el.w(TREE_WIDTH).border_l(1).border_color(t.border)).when(!this.tabs.length, el => el.flex_1().min_w(0))
       .child(h_flex().h(36).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
         .when(Boolean(context && this.icon(name, true, true, 16, t)), el => el.child(this.icon(name, true, true, 16, t)))
-        .child(div().flex_1().min_w(0).truncate().font_semibold().child(name || "Files")))
+        .child(div().flex_1().min_w(0).truncate().font_semibold().child(name || "Files"))
+        .child(div().id("explorer-settings").w(24).h(24).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
+          .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .on_click(() => this.openSettings()).child(svg(`${MOD}/ui/settings.svg`).size(14))))
       .when(rows.length > 0, el => el.child(div().flex_1().min_h(0).relative().pt(4)
         // Only the rows on screen are built, so a large repository stays smooth.
         .child(v_virtual_list("explorer-tree", rows.length, ROW, i => rows[i]?.path ?? String(i),
@@ -566,7 +631,9 @@ export default class Explorer extends View {
   }
 
   render(cx) {
+    if (this.menu) return this.renderMenu(theme());
     this.sync(cx);
+    this.followTheme(cx);
     // ctrl-shift-e shows the panel; give the tree the keyboard as it appears. The tab bar also
     // reopens it after a space switch, which must leave the keyboard in the terminal.
     const panel = findNode(layout(), "panel"), shown = Boolean(panel && !panel.hidden);

@@ -10,7 +10,7 @@ mods/file-explorer/main.js
   icon themes, editor tabs with previews, keyboard navigation and a virtual list.
   The parts derived from Herdr remain under the Apache License 2.0.
 
-mods/file-explorer/ui/chevron-*.svg
+mods/file-explorer/ui/*.svg (folder arrows, settings gear)
   Lucide icons (https://lucide.dev), ISC License (mods/file-explorer/ui/LICENSE-Lucide.txt),
   as shipped with Herdr's mods.
 

@@ -14,8 +14,9 @@ Run `scripts/install.ps1` (or copy `mods/file-explorer` into `~/.config/herdr-ap
 - `seti` (default): VS Code's default file icons; folders show arrows only.
 - `material`: Material Icon Theme, with folder icons.
 
-Choose with `scripts/install.ps1 -IconTheme material`, or set `iconTheme` in the installed
-`mods/file-explorer/config.json`. Themes live in `mods/file-explorer/icon-themes/<name>/theme.json`.
+Switch any time from the gear (⚙) in the explorer's header. `scripts/install.ps1 -IconTheme material`
+sets the default for a fresh install (`iconTheme` in the installed `mods/file-explorer/config.json`);
+the menu's choice overrides it. Themes live in `mods/file-explorer/icon-themes/<name>/theme.json`.
 
 ## Develop
 
