@@ -6,6 +6,7 @@ file icons and git colors, and read-only editor tabs beside it, in the right-han
 ## Use
 
 - **Tree:** click a folder to open it; click a file for a preview tab, double-click to keep it.
+  Drag a file or folder onto a terminal to type its path there, for example into an agent's prompt.
   Keys: arrows, Home/End, Page Up/Down, Enter, Space, typing jumps to a name, Escape returns to the terminal.
 - **Git:** VS Code's letters and colors (U, A, M, D, C); folders holding changes get a dot; ignored files are dimmed.
 - **Right-click** a file, a folder or empty space: Open, New File…, New Folder…, Copy Path,
@@ -20,6 +21,8 @@ file icons and git colors, and read-only editor tabs beside it, in the right-han
   sets the default for an install (`editorFont`, `editorFontSize` in its `config.json`); VS Code's font without them.
 
 ## Install
+
+Needs Herdr 0.1.16 or newer.
 
 **With an agent** (Herdr's usual way): in a terminal in Herdr, ask your coding agent:
 

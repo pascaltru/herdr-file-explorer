@@ -48,6 +48,9 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Clicking a folder opens or closes it.
   - Clicking a file opens a preview tab; the next preview replaces it. A double-click keeps the tab.
   - Clicking a tab shows it; double-clicking keeps it; a middle click or `×` closes it.
+- **Dragging** a file or folder onto a terminal types its quoted path there, without Enter
+  (Herdr's `drag_paths`). Dropping anywhere else does nothing. A row being renamed and a file deleted
+  on disk can't be dragged.
 - **Keys in the tree:**
   - Up/Down, Page Up/Down and Home/End move the selection.
   - Right opens a folder, or moves into it if it's open. Left closes a folder, or moves to its parent.
@@ -177,6 +180,8 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
 - Editing a file from a terminal turns it yellow within a second. An open tab of it shows the new text.
   Committing clears the color.
 - Writing files inside `node_modules` or `obj` runs no git.
+- Dragging a file from the tree onto a terminal types its quoted path at the prompt; a plain click on
+  the row still opens it.
 - `ctrl-e`, then typing `mainjs`, ranks `main.js` first; Enter opens it and selects it in the tree.
 - Right-click → New File…, typing a name, Enter: the file appears at once, in sort order. F2 renames.
   Del asks first, then moves the file to the Recycle Bin or Trash.

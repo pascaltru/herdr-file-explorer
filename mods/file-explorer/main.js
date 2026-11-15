@@ -1024,6 +1024,8 @@ export default class Explorer extends View {
       .when(selected, el => el.bg(t.selected)).when(hovered && !selected, el => el.bg(t.hover))
       .on_click((e, cx) => this.clicked(path, cx, e.click_count >= 2))
       .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.contextMenu(path, cx); })
+      // Dropped on a terminal, Herdr types the quoted path there (into an agent's prompt, say).
+      .when(!naming && !this.deleted.has(path), el => el.drag_paths([this.join(path)], { on: this.context.on }))
       .children(guides)
       // Folders get arrows, as in VS Code; a theme without folder icons (Seti) shows only the arrow.
       .child(entry.dir ? svg(`${MOD}/ui/chevron-${open ? "down" : "right"}.svg`).size(14).flex_none().text_color(t.muted) : div().w(14).flex_none())
