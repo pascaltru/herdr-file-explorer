@@ -109,6 +109,15 @@ function findNode(node, id) {
   return null;
 }
 
+// Whether an explorer block is on screen: nothing above it hidden, and the shown child of each stack.
+function shownIn(node) {
+  if (!node || node.hidden) return false;
+  if (node.content?.mod === NAME) return true;
+  const kids = node.children ?? [];
+  if (node.type === "stack") return shownIn(kids.find(c => c.id === node.active) ?? kids[0]);
+  return kids.some(shownIn);
+}
+
 const readJson = async path => JSON.parse(await fs.readFile(`${appHome()}/${path}`, "utf8"));
 
 // The menu's choice, else the install's (config.json), else Seti.
@@ -244,7 +253,12 @@ export default class Explorer extends View {
     this.version = 0; this.flatCache = null; this.typed = ""; this.typedAt = 0; this.terminalPane = null;
     this.reset();
     // Remote spaces can't be watched, and a failed watch falls back to polling.
-    cx.timer.every(10000, cx => { if (this.context && (this.context.on || this.context.poll)) this.reload(cx, null, true); });
+    // Herdr keeps a hidden panel's mod running: it refreshes once shown again instead (see render).
+    cx.timer.every(10000, cx => {
+      const context = this.context;
+      if (!context || !(context.on || context.poll)) return;
+      if (shownIn(layout())) this.reload(cx, null, true); else context.missed = true;
+    });
     // pane.go (alt+arrows) hands the keyboard to this panel.
     cx.spawn(async cx => { for (;;) { const c = await nextCommand(); if (c === "focus") this.h.focus(); cx.notify(); } });
   }
@@ -339,6 +353,7 @@ export default class Explorer extends View {
   flush(context, cx) {
     if (this.context !== context) return;
     const paths = [...this.changed]; this.changed.clear();
+    if (!shownIn(layout())) { context.missed = true; return; }
     const rootSlash = context.root.replace(/\\/g, "/"), windows = this.windows(context);
     const fold = s => windows ? s.toLowerCase() : s, rootKey = fold(rootSlash);
     const dirs = new Set();
@@ -385,7 +400,7 @@ export default class Explorer extends View {
             if (rels.length && this.context === context) await this.load(rels, context);
           } else {
             if (rels.length) await this.load(rels, context);
-            if (w.git && this.context === context) await this.status(context);
+            if (w.git && context.repo && this.context === context) await this.status(context);
           }
           if (this.context === context) this.error = null;
           cx.notify();
@@ -417,11 +432,18 @@ export default class Explorer extends View {
     if (this.context !== context) return;
     rels.forEach((rel, i) => {
       const list = lists[i];
-      if (list === null) { this.entries.delete(rel); if (rel) this.folders.delete(rel); return; }
+      if (list === null) {
+        if (this.entries.delete(rel)) this.version++;
+        if (rel) this.folders.delete(rel);
+        return;
+      }
       if (list.length > PER_FOLDER) this.limited = true;
-      this.entries.set(rel, sortEntries(list.slice(0, PER_FOLDER)));
+      const fresh = sortEntries(list.slice(0, PER_FOLDER)), old = this.entries.get(rel);
+      // Polling outside a repository reads the same folders every 10 seconds: keep what didn't change.
+      if (old && old.length === fresh.length && fresh.every((e, j) => e.name === old[j].name && e.dir === old[j].dir)) return;
+      this.entries.set(rel, fresh);
+      this.version++;
     });
-    this.version++;
   }
 
   // VS Code's letters: U untracked, A added, M modified, D deleted, C conflict. Folders take the
@@ -1114,6 +1136,12 @@ export default class Explorer extends View {
     if (this.syntaxSeen !== undefined && syntax !== this.syntaxSeen) for (const tab of this.tabs) this.drop(tab.rel);
     this.syntaxSeen = syntax;
     this.handleRequest(cx);
+    // Changes seen or polls skipped while hidden: catch up now that it's drawn.
+    if (this.context?.missed && shownIn(layout())) {
+      this.context.missed = false;
+      this.reload(cx, null, true);
+      for (const tab of this.tabs) this.drop(tab.rel);
+    }
     // ctrl-shift-e shows the panel; give the tree the keyboard as it appears. The tab bar also
     // reopens it after a space switch, which must leave the keyboard in the terminal.
     const panel = findNode(layout(), "panel"), shown = Boolean(panel && !panel.hidden);
