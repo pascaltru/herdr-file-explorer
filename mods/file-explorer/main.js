@@ -313,6 +313,8 @@ export default class Explorer extends View {
   switchTo(root, on, repo, cx) {
     const old = this.context;
     if (old && old.root === root && old.on === on) return;
+    // Coming back reloads in full, so the old folder's watch would only hold one of Herdr's 64 slots.
+    old?.watch?.cancel();
     if (old) {
       for (const view of this.views.values()) this.release(view);
       this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, deleted: this.deleted, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active });
@@ -320,7 +322,7 @@ export default class Explorer extends View {
     if (!root) { this.context = null; this.reset(); this.fit(); return; }
     this.reset(this.saved.get(`${on ?? ""}|${root}`));
     // Outside a repository (a terminal in the home folder), a recursive watch would see every file on disk: poll instead.
-    this.context = { root, on, repo, want: null, busy: false, poll: !repo, watched: false };
+    this.context = { root, on, repo, want: null, busy: false, poll: !repo, watched: false, watch: null };
     this.reload(cx, null, true);
     this.watch(cx);
     this.fit();
@@ -335,7 +337,7 @@ export default class Explorer extends View {
     cx.spawn(async cx => {
       try {
         while (this.context === context) {
-          const changed = await watchFolder(context.root);
+          const changed = await (context.watch = watchFolder(context.root));
           if (this.context !== context) return;
           for (const p of changed) this.changed.add(p);
           if (!this.flushing) {
