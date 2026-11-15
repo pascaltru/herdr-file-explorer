@@ -1,3 +1,6 @@
 # Written by Herdr into every mod folder on start
 jsconfig.json
 *.d.ts
+
+# Personal Claude Code notes
+CLAUDE.local.md
