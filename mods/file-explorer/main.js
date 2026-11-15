@@ -276,7 +276,7 @@ export default class Explorer extends View {
 
   reset(saved) {
     this.entries = saved?.entries ?? new Map(); this.folders = saved?.folders ?? new Set(); this.marks = saved?.marks ?? {}; this.folderMarks = saved?.folderMarks ?? {}; this.ignored = saved?.ignored ?? new Set(); this.ignoredCache = new Map();
-    this.ignoredEntries = saved?.ignoredEntries ?? []; this.lazy = saved?.lazy ?? new Set();
+    this.ignoredEntries = saved?.ignoredEntries ?? []; this.deleted = saved?.deleted ?? new Set(); this.lazy = saved?.lazy ?? new Set();
     this.selected = saved?.selected ?? null; this.tabs = saved?.tabs ?? []; this.active = saved?.active ?? null;
     this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.limited = false;
     this.version++;
@@ -328,7 +328,7 @@ export default class Explorer extends View {
     if (old && old.root === root && old.on === on) return;
     if (old) {
       for (const view of this.views.values()) this.release(view);
-      this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active });
+      this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, deleted: this.deleted, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active });
     }
     if (!root) { this.context = null; this.reset(); this.fit(); return; }
     this.reset(this.saved.get(`${on ?? ""}|${root}`));
@@ -412,7 +412,11 @@ export default class Explorer extends View {
           if (context.repo) {
             // git lists the whole repository in one quick call; only the folders it leaves out
             // (ignored, untracked) are read from disk, which on Windows means starting PowerShell.
-            if (w.all || w.git) { const structure = await this.status(context); if (this.context === context) await this.gitTree(context, structure); }
+            if (w.all || w.git) {
+              // Both git calls at once: the tree needs the status's ignored and deleted entries.
+              const [structure, list] = await Promise.all([this.status(context), this.listFiles(context)]);
+              if (this.context === context) this.gitTree(context, structure, list);
+            }
             rels = rels.filter(r => this.isLazy(r));
             if (rels.length && this.context === context) await this.load(rels, context);
           } else {
@@ -468,16 +472,21 @@ export default class Explorer extends View {
   // The repository's tree from `git ls-files`: tracked files (less those deleted on disk) and untracked
   // ones. A folder git doesn't list inside (an untracked folder, an ignored one from git status) is
   // "lazy": shown, and read from disk when opened.
-  async gitTree(context, structureChanged = true) {
-    const r = await exec("git", ["--no-optional-locks", "ls-files", "-z", "-t", "-c", "-d", "-o", "--exclude-standard", "--directory"], { cwd: context.root, on: context.on, timeout: 60000 });
+  // Tracked and untracked files. Not -d (deleted on disk): it costs about half as much again on a
+  // 1,300-file repository, and git status reports those files anyway.
+  async listFiles(context) {
+    const r = await exec("git", ["--no-optional-locks", "ls-files", "-z", "-t", "-c", "-o", "--exclude-standard", "--directory"], { cwd: context.root, on: context.on, timeout: 60000 });
     if (r.code !== 0) throw new Error(r.stderr || "git ls-files failed");
-    // Most changes an agent makes edit file contents: same file list, same ignored entries
-    // (from git status). Then there's nothing to rebuild, even when a file's git color changed.
-    if (!structureChanged && r.stdout === context.treeOut) return;
-    context.treeOut = r.stdout;
-    const items = r.stdout.split("\0"), removed = new Set();
-    // -t tags each path: H tracked, R deleted on disk, S not checked out (sparse), ? untracked.
-    for (const item of items) if (item.startsWith("R ")) removed.add(item.slice(2));
+    return r.stdout;
+  }
+
+  gitTree(context, structureChanged, stdout) {
+    // Most changes an agent makes edit file contents: same file list, same ignored and deleted
+    // entries (from git status). Then there's nothing to rebuild, even when a file's git color changed.
+    if (!structureChanged && stdout === context.treeOut) return;
+    context.treeOut = stdout;
+    // -t tags each path: H tracked, S not checked out (sparse), ? untracked.
+    const items = stdout.split("\0"), removed = this.deleted;
     const tree = new Map([["", new Map()]]), lazy = new Set();
     const add = (path, dir) => {
       const parts = path.split("/");
@@ -492,7 +501,7 @@ export default class Explorer extends View {
     };
     let count = 0;
     for (const item of items) {
-      if (!item || item.startsWith("R ") || item.startsWith("S ") || ++count > MAX_GIT_PATHS) continue;
+      if (!item || item.startsWith("S ") || ++count > MAX_GIT_PATHS) continue;
       const path = item.slice(2);
       if (removed.has(path)) continue;
       if (path.endsWith("/")) { add(path.slice(0, -1), true); lazy.add(path.slice(0, -1)); }
@@ -523,7 +532,7 @@ export default class Explorer extends View {
   }
 
   async status(context) {
-    const marks = {}, folders = {}, ignored = new Set(), ignoredEntries = [];
+    const marks = {}, folders = {}, ignored = new Set(), ignoredEntries = [], deleted = new Set();
     // Writes nothing under .git (index lock, fsmonitor cookie): the folder watch would refresh again.
     const r = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--ignored=matching"], { cwd: context.root, on: context.on }).catch(() => null);
     // Unchanged since last time: keep everything (and tell the tree its ignored entries are the same).
@@ -534,6 +543,8 @@ export default class Explorer extends View {
       const xy = entry.slice(0, 2), path = entry.slice(3).replace(/\/$/, "");
       // --ignored=matching names an ignored folder once, with a trailing slash.
       if (xy === "!!") { ignored.add(path); ignoredEntries.push({ path, dir: entry.endsWith("/") }); continue; }
+      // Deleted on disk but still in the index: ls-files lists it, the tree leaves it out.
+      if (xy[1] === "D") deleted.add(path);
       const mark = CONFLICTS.has(xy) ? "C" : xy === "??" ? "U" : xy.includes("A") ? "A" : xy.includes("D") ? "D" : "M";
       marks[path] = mark;
       for (let i = path.lastIndexOf("/"); i > 0; i = path.lastIndexOf("/", i - 1)) {
@@ -541,10 +552,10 @@ export default class Explorer extends View {
         if (RANK[mark] > (RANK[folders[folder]] ?? 0)) folders[folder] = mark;
       }
     }
-    // What the tree is built from (the ignored entries); the marks only change colors.
-    const structure = JSON.stringify(ignoredEntries), structureChanged = structure !== context.structure;
+    // What the tree is built from (the ignored and deleted entries); the marks only change colors.
+    const structure = JSON.stringify([ignoredEntries, [...deleted]]), structureChanged = structure !== context.structure;
     context.structure = structure;
-    if (this.context === context) { this.marks = marks; this.folderMarks = folders; this.ignored = ignored; this.ignoredEntries = ignoredEntries; this.ignoredCache = new Map(); }
+    if (this.context === context) { this.marks = marks; this.folderMarks = folders; this.ignored = ignored; this.ignoredEntries = ignoredEntries; this.deleted = deleted; this.ignoredCache = new Map(); }
     return structureChanged;
   }
 
