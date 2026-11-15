@@ -2,11 +2,12 @@
 // Derived from the Herdr app's `files` mod (Apache-2.0, see LICENSE-Herdr.txt) and modified; see NOTICE.
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, fonts, window, run, appHome, layout, nextCommand, openOverlay, shared, setShared, props, notify } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify } from "herdr";
 import * as fs from "fs/promises";
 import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
 import * as ops from "./ops.js";
 import { QuickOpen, remember } from "./quickopen.js";
+import { shownIn, sizedNode } from "./place.js";
 
 const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CACHE = "cache/file-explorer";
 const MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
@@ -103,20 +104,6 @@ function location() {
   return { space: space.id, ...last };
 }
 
-function findNode(node, id) {
-  if (node?.id === id) return node;
-  for (const child of node?.children ?? []) { const found = findNode(child, id); if (found) return found; }
-  return null;
-}
-
-// Whether an explorer block is on screen: nothing above it hidden, and the shown child of each stack.
-function shownIn(node) {
-  if (!node || node.hidden) return false;
-  if (node.content?.mod === NAME) return true;
-  const kids = node.children ?? [];
-  if (node.type === "stack") return shownIn(kids.find(c => c.id === node.active) ?? kids[0]);
-  return kids.some(shownIn);
-}
 
 const readJson = async path => JSON.parse(await fs.readFile(`${appHome()}/${path}`, "utf8"));
 
@@ -268,7 +255,7 @@ export default class Explorer extends View {
     cx.timer.every(10000, cx => {
       const context = this.context;
       if (!context || !(context.on || context.poll)) return;
-      if (shownIn(layout())) this.reload(cx, null, true); else context.missed = true;
+      if (shownIn()) this.reload(cx, null, true); else context.missed = true;
     });
     // pane.go (alt+arrows) hands the keyboard to this panel.
     cx.spawn(async cx => { for (;;) { const c = await nextCommand(); if (c === "focus") this.h.focus(); cx.notify(); } });
@@ -364,7 +351,7 @@ export default class Explorer extends View {
   flush(context, cx) {
     if (this.context !== context) return;
     const paths = [...this.changed]; this.changed.clear();
-    if (!shownIn(layout())) { context.missed = true; return; }
+    if (!shownIn()) { context.missed = true; return; }
     const rootSlash = context.root.replace(/\\/g, "/"), windows = this.windows(context);
     const fold = s => windows ? s.toLowerCase() : s, rootKey = fold(rootSlash);
     const dirs = new Set();
@@ -720,10 +707,10 @@ export default class Explorer extends View {
 
   // The panel is as wide as an editor while files are open, and as narrow as a tree otherwise.
   fit() {
-    const wide = this.tabs.length > 0;
-    if (wide === this.wide) return;
+    const wide = this.tabs.length > 0, node = sizedNode();
+    if (wide === this.wide || !node) return;
     this.wide = wide;
-    run("layout.resize", wide ? { id: "panel", weight: 1.2 } : { id: "panel", px: NARROW });
+    run("layout.resize", wide ? { id: node.id, weight: 1.2 } : { id: node.id, px: NARROW });
   }
 
   // --- File views --------------------------------------------------------------------
@@ -1172,14 +1159,14 @@ export default class Explorer extends View {
     this.syntaxSeen = syntax;
     this.handleRequest(cx);
     // Changes seen or polls skipped while hidden: catch up now that it's drawn.
-    if (this.context?.missed && shownIn(layout())) {
+    if (this.context?.missed && shownIn()) {
       this.context.missed = false;
       this.reload(cx, null, true);
       for (const tab of this.tabs) this.drop(tab.rel);
     }
     // ctrl-shift-e shows the panel; give the tree the keyboard as it appears. The tab bar also
     // reopens it after a space switch, which must leave the keyboard in the terminal.
-    const panel = findNode(layout(), "panel"), shown = Boolean(panel && !panel.hidden);
+    const shown = shownIn();
     if (shown && this.panelShown === false && Date.now() - (this.spaceChangedAt ?? 0) > 1500) this.h.focus();
     this.panelShown = shown;
     const t = theme();

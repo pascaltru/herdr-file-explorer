@@ -2,8 +2,9 @@
 // with mod.open (mod.json's overlay) draws it; a chosen file opens in the explorer panel.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
-import { exec, props, closeOverlay, run, shared, setShared } from "herdr";
+import { exec, props, closeOverlay, shared, setShared } from "herdr";
 import { NAME, REQUEST } from "./menus.js";
+import { showBlock } from "./place.js";
 
 export const RECENT_KEY = `${NAME}.recent`;
 const MAX_RESULTS = 50, MAX_RECENT = 20, MAX_FILES = 200000, ROW = 30;
@@ -115,8 +116,7 @@ export class QuickOpen {
   // Shows the panel and has the explorer open and reveal the file (see Explorer.handleRequest).
   choose(rel) {
     if (!rel) return;
-    run("layout.select", { stack: "panel-body", child: "files" });
-    run("layout.show", { id: "panel" });
+    showBlock();
     setShared(REQUEST, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now(), action: "reveal", rel, root: this.root });
     closeOverlay(props().overlay);
   }
