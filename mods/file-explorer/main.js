@@ -348,10 +348,14 @@ export default class Explorer extends View {
       if (fold(slash) === rootKey) { all = true; break; }
       if (!fold(slash).startsWith(rootKey + "/")) continue;
       const rel = slash.slice(rootSlash.length + 1);
-      git = true;
       if (rel === ".git" || rel.startsWith(".git/")) continue;
       const parent = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
-      if (this.entries.has(parent)) dirs.add(parent);
+      // Inside an ignored folder (node_modules, obj, dist), git's answers can't change: a build
+      // or a dev server writing there would otherwise run git every 400 ms.
+      if (!this.isIgnored(parent)) git = true;
+      // Re-read only folders on screen; one only read ahead is dropped and read again when needed.
+      if (parent === "" || this.folders.has(parent)) dirs.add(parent);
+      else if (this.entries.has(parent) && this.isLazy(parent)) { this.entries.delete(parent); this.version++; }
       // An agent editing an open file: show the new text.
       if (this.tabs.some(t => t.rel === rel)) this.stale(rel, cx);
     }
