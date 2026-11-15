@@ -15,6 +15,8 @@ file icons and git colors, and read-only editor tabs beside it, in the right-han
 - **Quick Open** (`ctrl-e`): find a file of the repository by name with fuzzy matching; before typing,
   the recently opened files. Enter opens it in the panel and reveals it in the tree.
 - **Syntax colors:** VS Code's Dark Modern and Light Modern palettes, or the Herdr theme's, from the gear menu.
+- **Editor font:** VS Code's default (Consolas 14 on Windows, Menlo 12 on macOS), the terminal's, or any installed
+  monospace font, and its size, from the gear menu.
 
 ## Install
 

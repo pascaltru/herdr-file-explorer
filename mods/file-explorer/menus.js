@@ -27,23 +27,35 @@ const separator = t => div().h(9).flex_none().flex().items_center().px(6).child(
 
 const heading = (t, text) => div().px(8).pt(4).pb(6).text_size(11).font_semibold().text_color(t.muted).child(text);
 
-function choice(t, id, label, on, onClick) {
+function choice(t, id, label, on, onClick, hint, family) {
   return h_flex().id(id).h(28).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer()
     .when(on, el => el.bg(t.selected)).hover(s => s.bg(t.hover)).on_click(onClick)
     .child(div().w(14).flex_none().text_color(t.accent).child(on ? "✓" : ""))
-    .child(div().flex_1().min_w(0).truncate().child(label));
+    .child(div().min_w(0).truncate().when(Boolean(family), el => el.font_family(family)).child(label))
+    .when(Boolean(hint), el => el.child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(hint)));
 }
 
-export function renderSettings(menu, t, onPick, syntax, onSyntax) {
+// The font and size stay open on a click, so several can be tried against the file behind.
+export function renderSettings(menu, t, o) {
   const { themes, current } = menu;
+  const fontRow = f => choice(t, `font-${f.name}`, f.label, f.name === o.font, () => o.onFont(f.name), f.hint, f.family);
+  const sizeButton = n => div().id(`size-${n}`).h(24).flex_1().flex().items_center().justify_center().rounded(6).cursor_pointer()
+    .when(n === o.size, el => el.bg(t.selected).text_color(t.accent).font_semibold()).hover(s => s.bg(t.hover))
+    .on_click(() => o.onSize(n)).child(String(n));
   return v_flex().id("explorer-menu").size_full().p(6).gap(2).text_size(13).text_color(t.foreground)
     .child(heading(t, "ICON THEME"))
-    .children(themes.map(th => choice(t, `theme-${th.name}`, th.label, th.name === current, () => { onPick(th.name); close(); })))
+    .children(themes.map(th => choice(t, `theme-${th.name}`, th.label, th.name === current, () => { o.onTheme(th.name); close(); })))
     .when(!themes.length, el => el.child(div().px(8).text_color(t.dim).child("Loading…")))
     .child(div().h(6).flex_none())
     .child(heading(t, "SYNTAX COLORS"))
-    .child(choice(t, "syntax-vscode", "VS Code", syntax === "vscode", () => { onSyntax("vscode"); close(); }))
-    .child(choice(t, "syntax-theme", "Herdr theme", syntax === "theme", () => { onSyntax("theme"); close(); }));
+    .child(choice(t, "syntax-vscode", "VS Code", o.syntax === "vscode", () => { o.onSyntax("vscode"); close(); }))
+    .child(choice(t, "syntax-theme", "Herdr theme", o.syntax === "theme", () => { o.onSyntax("theme"); close(); }))
+    .child(div().h(6).flex_none())
+    .child(heading(t, "EDITOR FONT"))
+    .child(v_flex().id("font-list").flex_none().h(Math.min(o.fonts.length, o.fontRows) * 30).overflow_y_scroll().gap(2).children(o.fonts.map(fontRow)))
+    .child(h_flex().h(28).flex_none().px(8).gap(2).items_center()
+      .child(div().w(40).flex_none().text_color(t.muted).child("Size"))
+      .children(o.sizes.map(sizeButton)));
 }
 
 // --- Right-click menu ---------------------------------------------------------------------

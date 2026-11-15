@@ -2,7 +2,7 @@
 // Derived from the Herdr app's `files` mod (Apache-2.0, see LICENSE-Herdr.txt) and modified; see NOTICE.
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, run, appHome, layout, nextCommand, openOverlay, shared, setShared, props, notify } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, fonts, window, run, appHome, layout, nextCommand, openOverlay, shared, setShared, props, notify } from "herdr";
 import * as fs from "fs/promises";
 import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
 import * as ops from "./ops.js";
@@ -12,7 +12,36 @@ const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CAC
 const MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
 // The settings menu's choice. Shared state rather than config.json: writing a file in the mod
 // folder would hot-reload the explorer and close its tabs.
-const THEME_KEY = `${NAME}.iconTheme`, SYNTAX_KEY = `${NAME}.syntax`;
+const THEME_KEY = `${NAME}.iconTheme`, SYNTAX_KEY = `${NAME}.syntax`, FONT_KEY = `${NAME}.font`, SIZE_KEY = `${NAME}.fontSize`;
+
+// VS Code's default editor.fontFamily and editor.fontSize on each platform.
+const VSCODE_FONT = { windows: ["Consolas", 14], macos: ["Menlo", 12], linux: ["Droid Sans Mono", 14] };
+const FONT_SIZES = [12, 13, 14, 15, 16], FONT_ROWS = 5;
+const MONOSPACE = /mono|code|consol|courier|cascadia|menlo|monaco|hack|fira|iosevka|inconsolata|lucida console/i;
+
+function vscodeFont() {
+  const [family, size] = VSCODE_FONT[window()?.platform] ?? VSCODE_FONT.linux;
+  // Herdr ships JetBrains Mono; Droid Sans Mono is rarely installed on Linux nowadays.
+  return { family: fonts().includes(family) ? family : "JetBrains Mono", size };
+}
+
+// "vscode" (the default), "terminal" (the terminal's font), or a font name.
+const fontChoice = () => shared(FONT_KEY) || "vscode";
+
+function editorFont() {
+  const choice = fontChoice(), size = shared(SIZE_KEY);
+  return { family: choice === "vscode" ? vscodeFont().family : choice === "terminal" ? settings().font_family : choice,
+    size: FONT_SIZES.includes(size) ? size : vscodeFont().size };
+}
+
+// The gear menu's font list: VS Code's, the terminal's, then installed monospace fonts by name.
+function fontChoices() {
+  const vs = vscodeFont().family, term = settings().font_family;
+  const others = [...new Set(fonts().filter(f => MONOSPACE.test(f) && f !== vs && f !== term))].sort((a, b) => a.localeCompare(b));
+  // Each name is drawn in its own font.
+  return [{ name: "vscode", label: `${vs} (VS Code)`, family: vs }, { name: "terminal", label: "Terminal font", hint: term, family: term },
+    ...others.map(f => ({ name: f, label: f, family: f }))];
+}
 
 // VS Code's Dark Modern and Light Modern token colors, for the twelve categories Herdr's editor
 // knows. VS Code tells control keywords (import, return: purple) from declarations (const,
@@ -664,8 +693,9 @@ export default class Explorer extends View {
         if (text.includes("\0")) { view.message = "Binary file: no preview"; return; }
         const t = theme();
         const language = LANG_BY_NAME[base(rel).toLowerCase()] ?? LANG[ext] ?? (ext || "txt");
+        const font = editorFont();
         view.code = EditorState.new({ language, readonly: true, value: text,
-          font_family: settings().font_family, font_size: 13,
+          font_family: font.family, font_size: font.size,
           syntax: syntaxColors(t) });
       } catch { if (this.views.get(rel) === view) view.message = "Can't preview this file: it's over 1 MB or unreadable"; }
       finally { cx.notify(); }
@@ -690,8 +720,9 @@ export default class Explorer extends View {
   // --- Settings ----------------------------------------------------------------------
 
   openSettings() {
-    // Sized for two themes; the list scrolls if more are installed.
-    openOverlay({ mod: NAME, kind: "popup", width: 260, height: 206, props: { menu: "settings", theme: this.icons?.name ?? null } });
+    // Sized for two icon themes; the font list scrolls past FONT_ROWS.
+    const height = 296 +Math.min(fontChoices().length, FONT_ROWS) * 30;
+    openOverlay({ mod: NAME, kind: "popup", width: 280, height, props: { menu: "settings", theme: this.icons?.name ?? null } });
   }
 
   // A theme picked in the menu: load it in place, keeping tabs and folders.
@@ -711,7 +742,12 @@ export default class Explorer extends View {
   renderMenu(t) {
     if (this.menu.kind === "context") return renderContext(props(), t);
     if (this.menu.kind === "delete") return renderDelete(props(), t, this.menu.handle);
-    return renderSettings(this.menu, t, name => setShared(THEME_KEY, name), syntaxMode(), mode => setShared(SYNTAX_KEY, mode));
+    return renderSettings(this.menu, t, {
+      onTheme: name => setShared(THEME_KEY, name),
+      syntax: syntaxMode(), onSyntax: mode => setShared(SYNTAX_KEY, mode),
+      font: fontChoice(), fonts: fontChoices(), fontRows: FONT_ROWS, onFont: name => setShared(FONT_KEY, name),
+      size: editorFont().size, sizes: FONT_SIZES, onSize: size => setShared(SIZE_KEY, size),
+    });
   }
 
   // --- File actions (right-click menu, F2, Delete) -----------------------------------
@@ -1059,8 +1095,8 @@ export default class Explorer extends View {
     if (this.menu) return this.renderMenu(theme());
     this.sync(cx);
     this.followTheme(cx);
-    // Open files are colored when they're read: a new syntax choice or appearance reads them again.
-    const syntax = `${syntaxMode()}-${settings().dark}`;
+    // Open files are colored when they're read: a new syntax choice, font or appearance reads them again.
+    const font = editorFont(), syntax = `${syntaxMode()}-${settings().dark}-${font.family}-${font.size}`;
     if (this.syntaxSeen !== undefined && syntax !== this.syntaxSeen) for (const tab of this.tabs) this.drop(tab.rel);
     this.syntaxSeen = syntax;
     this.handleRequest(cx);
