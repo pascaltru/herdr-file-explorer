@@ -25,13 +25,19 @@ function vscodeFont() {
   return { family: fonts().includes(family) ? family : "JetBrains Mono", size };
 }
 
+// The install's choices (config.json), read once; the menu's override them.
+let installed = {};
+async function loadConfig() {
+  try { installed = await readJson(`${MOD}/config.json`); } catch { installed = {}; }
+}
+
 // "vscode" (the default), "terminal" (the terminal's font), or a font name.
-const fontChoice = () => shared(FONT_KEY) || "vscode";
+const fontChoice = () => shared(FONT_KEY) || installed.editorFont || "vscode";
 
 function editorFont() {
-  const choice = fontChoice(), size = shared(SIZE_KEY);
+  const choice = fontChoice(), size = [shared(SIZE_KEY), installed.editorFontSize].find(n => FONT_SIZES.includes(n));
   return { family: choice === "vscode" ? vscodeFont().family : choice === "terminal" ? settings().font_family : choice,
-    size: FONT_SIZES.includes(size) ? size : vscodeFont().size };
+    size: size ?? vscodeFont().size };
 }
 
 // The gear menu's font list: VS Code's, the terminal's, then installed monospace fonts by name.
@@ -205,6 +211,8 @@ async function listFolders(paths, on, windows) {
 
 export default class Explorer extends View {
   init(_props, cx) {
+    // Open files are read again once it's in, if it names another font (see render).
+    cx.spawn(async cx => { await loadConfig(); cx.notify(); });
     // The same mod opened as an overlay draws only that popup (menus.js).
     const p = props();
     if (p?.menu === "settings") {

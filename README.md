@@ -16,7 +16,8 @@ file icons and git colors, and read-only editor tabs beside it, in the right-han
   the recently opened files. Enter opens it in the panel and reveals it in the tree.
 - **Syntax colors:** VS Code's Dark Modern and Light Modern palettes, or the Herdr theme's, from the gear menu.
 - **Editor font:** VS Code's default (Consolas 14 on Windows, Menlo 12 on macOS), the terminal's, or any installed
-  monospace font, and its size, from the gear menu.
+  monospace font, and its size, from the gear menu. `scripts/install.ps1 -EditorFont <vscode|terminal|name> -EditorFontSize <12-16>`
+  sets the default for an install (`editorFont`, `editorFontSize` in its `config.json`); VS Code's font without them.
 
 ## Install
 
