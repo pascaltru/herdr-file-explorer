@@ -2,7 +2,7 @@
 // Derived from the Herdr app's `files` mod (Apache-2.0, see LICENSE-Herdr.txt) and modified; see NOTICE.
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify, checking } from "herdr";
 import * as fs from "fs/promises";
 import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
 import * as ops from "./ops.js";
@@ -282,6 +282,8 @@ export default class Explorer extends View {
   // --- Where the tree is -------------------------------------------------------------
 
   sync(cx) {
+    // `herdr-app check` draws the mod for real: no git, PowerShell or folder watch for it.
+    if (checking()) return;
     const loc = location(), k = JSON.stringify([loc.space, loc.on, loc.cwd]);
     this.terminalPane = loc.pane;
     if (loc.space !== this.space) { this.space = loc.space; this.spaceChangedAt = Date.now(); }
