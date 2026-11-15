@@ -363,7 +363,8 @@ export default class Explorer extends View {
       if (fold(slash) === rootKey) { all = true; break; }
       if (!fold(slash).startsWith(rootKey + "/")) continue;
       const rel = slash.slice(rootSlash.length + 1);
-      if (rel === ".git" || rel.startsWith(".git/")) continue;
+      // A commit, a stage or a checkout changes only .git: the colors may change, not the folders shown.
+      if (rel === ".git" || rel.startsWith(".git/")) { git = true; continue; }
       const parent = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
       // Inside an ignored folder (node_modules, obj, dist), git's answers can't change: a build
       // or a dev server writing there would otherwise run git every 400 ms.
