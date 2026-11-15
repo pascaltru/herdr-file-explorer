@@ -35,9 +35,11 @@ async function loadConfig() {
 const fontChoice = () => shared(FONT_KEY) || installed.editorFont || "vscode";
 
 function editorFont() {
-  const choice = fontChoice(), size = [shared(SIZE_KEY), installed.editorFontSize].find(n => FONT_SIZES.includes(n));
-  return { family: choice === "vscode" ? vscodeFont().family : choice === "terminal" ? settings().font_family : choice,
-    size: size ?? vscodeFont().size };
+  const choice = fontChoice(), size = [shared(SIZE_KEY), installed.editorFontSize].find(n => FONT_SIZES.includes(n)) ?? vscodeFont().size;
+  // VS Code's line height (editor.lineHeight 0): the size times 1.35, or 1.5 on macOS, rounded.
+  // Herdr's editor spaces lines wider, 23px rather than 19px at 14.
+  const lineHeight = Math.round(size * (window()?.platform === "macos" ? 1.5 : 1.35));
+  return { family: choice === "vscode" ? vscodeFont().family : choice === "terminal" ? settings().font_family : choice, size, lineHeight };
 }
 
 // The gear menu's font list: VS Code's, the terminal's, then installed monospace fonts by name.
@@ -1089,7 +1091,7 @@ export default class Explorer extends View {
         .child(div().text_color(last ? t.foreground : t.muted).child(part)));
     });
     const body = !view ? div()
-      : view.code ? Editor.new(view.code).flex_1().min_h(0)
+      : view.code ? Editor.new(view.code).flex_1().min_h(0).line_height(`${editorFont().lineHeight}px`)
       : view.picture ? div().flex_1().min_h(0).p(16).flex().items_center().justify_center().child(image(view.picture).max_w_full().max_h_full())
       : div().p(16).text_color(t.dim).child(view.message ?? "Loading…");
     return v_flex().id("explorer-editor").flex_1().min_w(0).h_full().min_h(0)
