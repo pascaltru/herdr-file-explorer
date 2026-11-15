@@ -12,7 +12,7 @@ mods/file-explorer/main.js
 
 mods/file-explorer/ui/*.svg (folder arrows, settings gear)
   Lucide icons (https://lucide.dev), ISC License (mods/file-explorer/ui/LICENSE-Lucide.txt),
-  as shipped with Herdr's mods.
+  as shipped with Herdr's mods; the toolbar icons from lucide-static 1.73.0.
 
 mods/file-explorer/icon-themes/seti/
   Seti UI icons by Jesse Weed (https://github.com/jesseweed/seti-ui), MIT License,

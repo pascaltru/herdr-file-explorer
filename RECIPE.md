@@ -48,6 +48,19 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Clicking a folder opens or closes it.
   - Clicking a file opens a preview tab; the next preview replaces it. A double-click keeps the tab.
   - Clicking a tab shows it; double-clicking keeps it; a middle click or `×` closes it.
+- **Toolbar** (under the header, as in Visual Studio's Solution Explorer):
+  - Search in explorer: keeps the files and folders whose name contains the text (case-insensitive, not
+    fuzzy), with the folders leading to them, open. A folder matching only by its own name shows
+    closed; opened, it shows everything it holds. Files inside an untracked or ignored folder that was
+    never opened aren't found: git doesn't list them.
+  - Pending changes (toggle, highlighted while on): only entries with a git letter or dot. It combines
+    with the search.
+  - Collapse: closes every folder, or every folder shown under a filter.
+  - Under a filter, folders can still be closed and opened; the folders open without a filter come
+    back when it's cleared. Escape in the box clears the search; Down or Enter moves to the first
+    match. Quick Open clears the filter when it would hide the chosen file.
+  - The filter, like open folders and tabs, belongs to the space's folder: switching space and back
+    restores it.
 - **Dragging** a file or folder onto a terminal types its quoted path there, without Enter
   (Herdr's `drag_paths`). Dropping anywhere else does nothing. A row being renamed and a file deleted
   on disk can't be dragged.
@@ -106,7 +119,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - `place.js`: layout lookups
   - `icon-themes/`: Seti and Material, VS Code icon-theme JSON plus SVGs, and VS Code's
     extension-to-language table
-  - `ui/`: chevrons and the gear icon, from Lucide
+  - `ui/`: chevrons, the gear and the toolbar icons, from Lucide
   - `config.json`: install defaults
 - **Popups:** the same mod opened with `openOverlay`, where `props().menu` picks the popup. With no menu
   and an `overlay` (from `mod.open`, using `mod.json`'s `overlay` spec), it opens as Quick Open. Popups
@@ -132,7 +145,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
 - **Art:**
   - Seti icons: VS Code's Seti font glyphs converted to SVG (MIT)
   - Material Icon Theme SVGs (MIT)
-  - Lucide chevrons and gear (ISC)
+  - Lucide chevrons, gear and toolbar icons (ISC)
   - `scripts/build-icon-themes.py` regenerates the themes from upstream at pinned versions
 
 ## Watch out
@@ -180,6 +193,10 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
 - Editing a file from a terminal turns it yellow within a second. An open tab of it shows the new text.
   Committing clears the color.
 - Writing files inside `node_modules` or `obj` runs no git.
+- Typing `chevron` in the search box shows `mods/file-explorer/ui/` open on the two chevron icons;
+  typing `file-explorer` shows that folder closed under `mods`, and opening it shows all its files;
+  Pending changes on its own lists exactly the files `git status` shows; Collapse leaves only the top
+  level.
 - Dragging a file from the tree onto a terminal types its quoted path at the prompt; a plain click on
   the row still opens it.
 - `ctrl-e`, then typing `mainjs`, ranks `main.js` first; Enter opens it and selects it in the tree.

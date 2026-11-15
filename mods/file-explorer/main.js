@@ -250,6 +250,16 @@ export default class Explorer extends View {
     cx.spawn(async cx => { this.icons = await loadIconTheme(await preferredTheme()); this.themeLoading = false; cx.notify(); });
     this.version = 0; this.flatCache = null; this.typed = ""; this.typedAt = 0; this.terminalPane = null;
     this.reset();
+    // The toolbar's filters (kept per space, see reset): a name search and changed files only.
+    this.searchFocused = false;
+    this.search = InputState.new({ placeholder: "Search in explorer" });
+    this.search.on("change", (_e, cx) => {
+      const query = this.search.value().trim().toLowerCase();
+      if (query !== this.query) { this.query = query; this.refilter(cx); }
+    });
+    this.search.on("focus", () => { this.searchFocused = true; });
+    this.search.on("blur", () => { this.searchFocused = false; });
+    this.search.on("submit", (_e, cx) => this.intoResults(cx));
     // Remote spaces can't be watched, and a failed watch falls back to polling.
     // Herdr keeps a hidden panel's mod running: it refreshes once shown again instead (see render).
     cx.timer.every(10000, cx => {
@@ -265,6 +275,12 @@ export default class Explorer extends View {
     this.entries = saved?.entries ?? new Map(); this.folders = saved?.folders ?? new Set(); this.marks = saved?.marks ?? {}; this.folderMarks = saved?.folderMarks ?? {}; this.ignored = saved?.ignored ?? new Set(); this.ignoredCache = new Map();
     this.ignoredEntries = saved?.ignoredEntries ?? []; this.deleted = saved?.deleted ?? new Set(); this.lazy = saved?.lazy ?? new Set();
     this.selected = saved?.selected ?? null; this.tabs = saved?.tabs ?? []; this.active = saved?.active ?? null;
+    // Under a filter, folders leading to a match show open unless closed there (filterClosed); a folder
+    // matching by name alone shows closed unless opened there (filterOpened). The folders open
+    // without a filter stay in `folders` for when it's cleared.
+    this.query = saved?.query ?? ""; this.changesOnly = saved?.changesOnly ?? false;
+    this.filterClosed = saved?.filterClosed ?? new Set(); this.filterOpened = saved?.filterOpened ?? new Set(); this.startClosed = new Set();
+    this.search?.set_value(saved?.searchText ?? "");
     this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.cut = new Set(); this.gitLimited = false;
     this.version++;
   }
@@ -322,7 +338,8 @@ export default class Explorer extends View {
     old?.watch?.cancel();
     if (old) {
       for (const view of this.views.values()) this.release(view);
-      this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, deleted: this.deleted, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active });
+      this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, deleted: this.deleted, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active,
+        query: this.query, searchText: this.search.value(), changesOnly: this.changesOnly, filterClosed: this.filterClosed, filterOpened: this.filterOpened });
     }
     if (!root) { this.context = null; this.reset(); this.fit(); return; }
     this.reset(this.saved.get(`${on ?? ""}|${root}`));
@@ -376,7 +393,7 @@ export default class Explorer extends View {
       // or a dev server writing there would otherwise run git every 400 ms.
       if (!this.isIgnored(parent)) git = true;
       // Re-read only folders on screen; one only read ahead is dropped and read again when needed.
-      if (parent === "" || this.folders.has(parent)) dirs.add(parent);
+      if (parent === "" || this.folders.has(parent) || this.filterOpened.has(parent)) dirs.add(parent);
       else if (this.entries.has(parent) && this.isLazy(parent)) { this.entries.delete(parent); this.version++; }
       // An agent editing an open file: show the new text.
       if (this.tabs.some(t => t.rel === rel)) this.stale(rel, cx);
@@ -402,7 +419,7 @@ export default class Explorer extends View {
       try {
         while (context.want && this.context === context) {
           const w = context.want; context.want = null;
-          let rels = w.all ? ["", ...this.folders] : [...w.dirs].filter(d => d === "" || this.entries.has(d) || this.folders.has(d));
+          let rels = w.all ? ["", ...this.folders] : [...w.dirs].filter(d => d === "" || this.entries.has(d) || this.folders.has(d) || this.filterOpened.has(d));
           if (context.repo) {
             // git lists the whole repository in one quick call; only the folders it leaves out
             // (ignored, untracked) are read from disk, which on Windows means starting PowerShell.
@@ -575,7 +592,62 @@ export default class Explorer extends View {
 
   // --- Tree actions ------------------------------------------------------------------
 
+  filtering() { return Boolean(this.query) || this.changesOnly; }
+
+  isOpen(path) {
+    if (!this.filtering()) return this.folders.has(path);
+    return this.startClosed.has(path) ? this.filterOpened.has(path) : !this.filterClosed.has(path);
+  }
+
+  refilter(cx) {
+    this.filterClosed.clear(); this.filterOpened.clear();
+    this.scrollTop = 0;
+    this.version++;
+    cx.notify();
+  }
+
+  clearFilter() {
+    this.query = ""; this.changesOnly = false; this.filterClosed.clear(); this.filterOpened.clear();
+    this.search.set_value("");
+    this.version++;
+  }
+
+  toggleChanges(cx) {
+    this.changesOnly = !this.changesOnly;
+    this.refilter(cx);
+  }
+
+  collapseAll(cx) {
+    if (this.filtering()) { for (const r of this.flat()) if (r.entry.dir) this.filterClosed.add(r.path); this.filterOpened.clear(); }
+    else this.folders.clear();
+    this.scrollTop = 0;
+    this.version++;
+    cx.notify();
+  }
+
+  // Enter or Down in the search box: the keyboard goes to the tree, on the first match.
+  intoResults(cx) {
+    const rows = this.flat(), i = rows.findIndex(r => r.match);
+    this.h.focus();
+    if (i !== -1) this.select(rows, i);
+    cx.notify();
+  }
+
   toggle(path, cx) {
+    if (this.filtering()) {
+      if (this.startClosed.has(path)) {
+        if (this.filterOpened.has(path)) this.filterOpened.delete(path);
+        else {
+          this.filterOpened.add(path);
+          // An untracked or ignored folder's contents come from disk.
+          if (!this.entries.has(path)) this.reload(cx, [path], false);
+        }
+      } else if (this.filterClosed.has(path)) this.filterClosed.delete(path); else this.filterClosed.add(path);
+      this.selected = path;
+      this.version++;
+      cx.notify();
+      return;
+    }
     if (this.folders.has(path)) {
       for (const folder of [...this.folders]) if (folder === path || folder.startsWith(path + "/")) this.folders.delete(folder);
     } else {
@@ -591,14 +663,37 @@ export default class Explorer extends View {
   // The visible rows in order, rebuilt only when the tree changes (render runs on every live-data change).
   flat() {
     if (this.flatCache?.version === this.version) return this.flatCache.rows;
-    const rows = [], walk = (prefix, depth) => {
+    // Under a filter, as in Visual Studio: the files and folders matching by name, and the folders
+    // leading to them. A folder matching only by its own name starts closed; opened, it shows all it
+    // holds. Only folders already read count: an unopened untracked or ignored folder isn't searched.
+    let shown = null, matched = null;
+    if (this.filtering()) {
+      shown = new Set(); matched = new Set(); this.startClosed = new Set();
+      const matches = (path, entry) => (!this.query || entry.name.toLowerCase().includes(this.query))
+        && (!this.changesOnly || Boolean(entry.dir ? this.folderMarks[path] : this.marks[path]));
+      const find = (prefix, depth) => {
+        let any = false;
+        for (const entry of this.entries.get(prefix) ?? []) {
+          const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+          const self = matches(path, entry), below = entry.dir && depth < 40 && find(path, depth + 1);
+          if (self) matched.add(path);
+          if (self && entry.dir && !below) this.startClosed.add(path);
+          if (self || below) { shown.add(path); any = true; }
+        }
+        return any;
+      };
+      find("", 0);
+    }
+    const rows = [], walk = (prefix, depth, inside) => {
       // A new file or folder is named in a row at the top of its folder, as in VS Code.
       if (this.edit?.kind === "new" && this.edit.parent === prefix) rows.push({ path: `${prefix}${NEW_ROW}`, entry: { name: "", dir: this.edit.dir }, depth, parent: prefix, editing: true });
       for (const entry of this.entries.get(prefix) ?? []) {
         if (rows.length >= TOTAL || depth > 40) return;
         const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-        rows.push({ path, entry, depth, parent: prefix });
-        if (entry.dir && this.folders.has(path)) walk(path, depth + 1);
+        if (shown && !inside && !shown.has(path)) continue;
+        if (inside && entry.dir) this.startClosed.add(path);
+        rows.push({ path, entry, depth, parent: prefix, match: matched?.has(path) });
+        if (entry.dir && this.isOpen(path)) walk(path, depth + 1, inside || this.startClosed.has(path));
       }
     };
     walk("", 0);
@@ -630,6 +725,12 @@ export default class Explorer extends View {
       if (e.key === "escape") { this.endEdit(cx); cx.stop_propagation(); }
       return;
     }
+    // The search box sits inside the tree's column: its typing isn't for the tree's keys.
+    if (this.searchFocused) {
+      if (e.key === "escape") { this.clearFilter(); this.h.focus(); cx.stop_propagation(); cx.notify(); }
+      else if (e.key === "down") { this.intoResults(cx); cx.stop_propagation(); }
+      return;
+    }
     const rows = this.flat(), i = rows.findIndex(r => r.path === this.selected), row = rows[i];
     let handled = true;
     switch (e.key) {
@@ -640,10 +741,10 @@ export default class Explorer extends View {
       case "home": this.select(rows, 0); break;
       case "end": this.select(rows, rows.length - 1); break;
       case "right":
-        if (row?.entry.dir) { if (!this.folders.has(row.path)) this.toggle(row.path, cx); else this.select(this.flat(), i + 1); }
+        if (row?.entry.dir) { if (!this.isOpen(row.path)) this.toggle(row.path, cx); else this.select(this.flat(), i + 1); }
         break;
       case "left":
-        if (row?.entry.dir && this.folders.has(row.path)) this.toggle(row.path, cx);
+        if (row?.entry.dir && this.isOpen(row.path)) this.toggle(row.path, cx);
         else if (row?.parent) this.select(rows, rows.findIndex(r => r.path === row.parent));
         break;
       case "enter": if (row) row.entry.dir ? this.toggle(row.path, cx) : this.open(row.path, true, cx); break;
@@ -693,6 +794,11 @@ export default class Explorer extends View {
   reveal(rel, cx) {
     const parents = [];
     for (let i = rel.indexOf("/"); i !== -1; i = rel.indexOf("/", i + 1)) parents.push(rel.slice(0, i));
+    if (this.filtering()) {
+      for (const f of parents) { this.filterClosed.delete(f); this.filterOpened.add(f); }
+      this.version++;
+      if (!this.flat().some(r => r.path === rel)) this.clearFilter();
+    }
     const closed = parents.filter(f => !this.folders.has(f));
     for (const f of closed) this.folders.add(f);
     // Folders git doesn't list inside are read from disk; the rest are already known.
@@ -1012,7 +1118,7 @@ export default class Explorer extends View {
     const naming = editing || (this.edit?.kind === "rename" && this.edit.rel === path);
     // A new entry's icon follows the name being typed.
     const shownName = editing ? this.edit.input.value() || (entry.dir ? "folder" : "file") : entry.name;
-    const open = this.folders.has(path), selected = this.selected === path, icon = this.icon(shownName, entry.dir, open, 16, t);
+    const open = this.isOpen(path), selected = this.selected === path, icon = this.icon(shownName, entry.dir, open, 16, t);
     const mark = entry.dir ? this.folderMarks[path] : this.marks[path], ignored = !mark && this.isIgnored(path);
     const color = ignored ? t.dim : this.markColor(mark, t, t.foreground);
     // Indent guides: one line per ancestor level, through each folder's arrow column.
@@ -1108,7 +1214,22 @@ export default class Explorer extends View {
   tree(t) {
     const context = this.context, rows = context ? this.flat() : [], focused = this.h.is_focused();
     const name = context?.root.split(/[\\/]/).filter(Boolean).pop() ?? "";
-    const empty = this.error || (context && !this.entries.has("") ? "Loading files…" : context ? "No files" : "No folder");
+    const empty = this.error || (context && !this.entries.has("") ? "Loading files…"
+      : context && this.filtering() ? (this.changesOnly && !this.query ? "No changes" : "No matching files")
+      : context ? "No files" : "No folder");
+    const button = (id, icon, tip, on, click) => div().id(id).w(26).h(26).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
+      .text_color(on ? t.foreground : t.muted).when(on, el => el.bg(t.selected)).hover(s => s.bg(on ? t.selected : t.hover).text_color(t.foreground))
+      .tooltip(tip).on_click((_e, cx) => click(cx)).child(svg(`${MOD}/ui/${icon}.svg`).size(15));
+    const toolbar = h_flex().h(38).flex_none().px(8).gap(4).items_center().border_b(1).border_color(t.border)
+      .child(h_flex().id("explorer-search").flex_1().min_w(0).h(26).px(6).gap(6).items_center().rounded(5).border_1()
+        .border_color(this.searchFocused ? t.accent : t.border).bg(t.background)
+        .child(svg(`${MOD}/ui/search.svg`).size(13).flex_none().text_color(t.dim))
+        .child(Input.new(this.search).flex_1().min_w(0).h_full().text_color(t.foreground))
+        .when(Boolean(this.query), el => el.child(div().id("explorer-search-clear").w(18).h(18).flex_none().flex().items_center().justify_center().rounded(3)
+          .cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .on_click((_e, cx) => { this.query = ""; this.search.set_value(""); this.refilter(cx); }).child(svg(`${MOD}/ui/x.svg`).size(12)))))
+      .child(button("explorer-changes", "file-diff", "Pending changes", this.changesOnly, cx => this.toggleChanges(cx)))
+      .child(button("explorer-collapse", "copy-minus", "Collapse folders", false, cx => this.collapseAll(cx)));
     // Only about what's on screen: Material's 1,000-icon folder, read ahead but closed, is no news.
     const limit = this.gitLimited ? `Large repository: only its first ${MAX_GIT_PATHS.toLocaleString()} files are shown`
       : [...this.cut].some(f => f === "" || this.folders.has(f)) ? `Some open folders show only their first ${PER_FOLDER} entries` : null;
@@ -1121,6 +1242,7 @@ export default class Explorer extends View {
         .child(div().id("explorer-settings").w(24).h(24).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
           .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => this.openSettings()).child(svg(`${MOD}/ui/settings.svg`).size(14))))
+      .when(Boolean(context), el => el.child(toolbar))
       .when(rows.length > 0, el => el.child(this.list(rows, t, focused)))
       .when(Boolean(this.edit?.error), el => el.child(div().px(12).py(6).flex_none().text_size(12).text_color(t.ansi1).border_t(1).border_color(t.border).child(this.edit.error)))
       .when(Boolean(this.error) || !rows.length, el => el.child(div().id("explorer-empty").p(12).text_size(12).text_color(t.dim)

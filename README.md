@@ -8,6 +8,10 @@ file icons and git colors, and read-only editor tabs beside it, in the right-han
 - **Tree:** click a folder to open it; click a file for a preview tab, double-click to keep it.
   Drag a file or folder onto a terminal to type its path there, for example into an agent's prompt.
   Keys: arrows, Home/End, Page Up/Down, Enter, Space, typing jumps to a name, Escape returns to the terminal.
+- **Toolbar:** the search box shows only the files and folders whose name contains the text, as in
+  Visual Studio. Pending changes shows only changed files (it combines with the search). Collapse closes
+  every folder. In the search box, Escape clears it and Down or Enter moves into the results. Each
+  folder keeps its own filter.
 - **Git:** VS Code's letters and colors (U, A, M, D, C); folders holding changes get a dot; ignored files are dimmed.
 - **Right-click** a file, a folder or empty space: Open, New File…, New Folder…, Copy Path,
   Copy Relative Path, Rename… (F2), Delete (Del, to the Recycle Bin or Trash after a confirmation),
@@ -69,7 +73,7 @@ MIT (`LICENSE`). Third-party parts keep their own licenses; see `NOTICE`.
 
 ## Credits
 
-- Started from Herdr's shipped `files` mod (Apache-2.0); folder arrows from it (Lucide).
+- Started from Herdr's shipped `files` mod (Apache-2.0); folder arrows from it, toolbar icons from Lucide.
 - Seti icons: [seti-ui](https://github.com/jesseweed/seti-ui) by Jesse Weed (MIT), as shipped in VS Code;
   glyphs converted to SVG. See `icon-themes/seti/LICENSE-seti.txt`.
 - Material icons: [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme) (MIT).
