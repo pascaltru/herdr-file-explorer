@@ -25,17 +25,25 @@ const separator = t => div().h(9).flex_none().flex().items_center().px(6).child(
 
 // --- Settings (gear) ----------------------------------------------------------------------
 
-export function renderSettings(menu, t, onPick) {
+const heading = (t, text) => div().px(8).pt(4).pb(6).text_size(11).font_semibold().text_color(t.muted).child(text);
+
+function choice(t, id, label, on, onClick) {
+  return h_flex().id(id).h(28).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer()
+    .when(on, el => el.bg(t.selected)).hover(s => s.bg(t.hover)).on_click(onClick)
+    .child(div().w(14).flex_none().text_color(t.accent).child(on ? "✓" : ""))
+    .child(div().flex_1().min_w(0).truncate().child(label));
+}
+
+export function renderSettings(menu, t, onPick, syntax, onSyntax) {
   const { themes, current } = menu;
   return v_flex().id("explorer-menu").size_full().p(6).gap(2).text_size(13).text_color(t.foreground)
-    .child(div().px(8).pt(4).pb(6).text_size(11).font_semibold().text_color(t.muted).child("ICON THEME"))
-    .child(v_flex().id("explorer-menu-themes").flex_1().min_h(0).overflow_y_scroll().gap(2).children(themes.map(th =>
-      h_flex().id(`theme-${th.name}`).h(28).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer()
-        .when(th.name === current, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
-        .on_click(() => { onPick(th.name); close(); })
-        .child(div().w(14).flex_none().text_color(t.accent).child(th.name === current ? "✓" : ""))
-        .child(div().flex_1().min_w(0).truncate().child(th.label)))))
-    .when(!themes.length, el => el.child(div().px(8).text_color(t.dim).child("Loading…")));
+    .child(heading(t, "ICON THEME"))
+    .children(themes.map(th => choice(t, `theme-${th.name}`, th.label, th.name === current, () => { onPick(th.name); close(); })))
+    .when(!themes.length, el => el.child(div().px(8).text_color(t.dim).child("Loading…")))
+    .child(div().h(6).flex_none())
+    .child(heading(t, "SYNTAX COLORS"))
+    .child(choice(t, "syntax-vscode", "VS Code", syntax === "vscode", () => { onSyntax("vscode"); close(); }))
+    .child(choice(t, "syntax-theme", "Herdr theme", syntax === "theme", () => { onSyntax("theme"); close(); }));
 }
 
 // --- Right-click menu ---------------------------------------------------------------------

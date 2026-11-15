@@ -11,7 +11,25 @@ const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CAC
 const MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
 // The settings menu's choice. Shared state rather than config.json: writing a file in the mod
 // folder would hot-reload the explorer and close its tabs.
-const THEME_KEY = `${NAME}.iconTheme`;
+const THEME_KEY = `${NAME}.iconTheme`, SYNTAX_KEY = `${NAME}.syntax`;
+
+// VS Code's Dark Modern and Light Modern token colors, for the twelve categories Herdr's editor
+// knows. VS Code tells control keywords (import, return: purple) from declarations (const,
+// function: blue); Herdr has one keyword category, which takes VS Code's general keyword blue.
+const VSCODE_SYNTAX = {
+  dark: { keyword: "#569CD6", boolean: "#569CD6", string: "#CE9178", "string.escape": "#D7BA7D", comment: "#6A9955", function: "#DCDCAA",
+    type: "#4EC9B0", number: "#B5CEA8", constant: "#4FC1FF", variable: "#9CDCFE", operator: "#D4D4D4", punctuation: "#CCCCCC" },
+  light: { keyword: "#0000FF", boolean: "#0000FF", string: "#A31515", "string.escape": "#EE0000", comment: "#008000", function: "#795E26",
+    type: "#267F99", number: "#098658", constant: "#0070C1", variable: "#001080", operator: "#000000", punctuation: "#3B3B3B" },
+};
+
+// "vscode" (the default) or "theme": colors taken from the Herdr theme's palette.
+const syntaxMode = () => (shared(SYNTAX_KEY) === "theme" ? "theme" : "vscode");
+
+function syntaxColors(t) {
+  if (syntaxMode() === "vscode") return VSCODE_SYNTAX[settings().dark === false ? "light" : "dark"];
+  return { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 };
+}
 const TREE_WIDTH = 280, NARROW = 368, ROW = 24, PAGE = 10;
 // The key of the row where a new file or folder is named; real paths never hold "//".
 const NEW_ROW = "//new";
@@ -611,7 +629,7 @@ export default class Explorer extends View {
         const t = theme();
         view.code = EditorState.new({ language: LANG[ext] ?? (ext || "txt"), readonly: true, value: text,
           font_family: settings().font_family, font_size: 13,
-          syntax: { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 } });
+          syntax: syntaxColors(t) });
       } catch { if (this.views.get(rel) === view) view.message = "Can't preview this file: it's over 1 MB or unreadable"; }
       finally { cx.notify(); }
     });
@@ -636,7 +654,7 @@ export default class Explorer extends View {
 
   openSettings() {
     // Sized for two themes; the list scrolls if more are installed.
-    openOverlay({ mod: NAME, kind: "popup", width: 260, height: 112, props: { menu: "settings", theme: this.icons?.name ?? null } });
+    openOverlay({ mod: NAME, kind: "popup", width: 260, height: 206, props: { menu: "settings", theme: this.icons?.name ?? null } });
   }
 
   // A theme picked in the menu: load it in place, keeping tabs and folders.
@@ -656,7 +674,7 @@ export default class Explorer extends View {
   renderMenu(t) {
     if (this.menu.kind === "context") return renderContext(props(), t);
     if (this.menu.kind === "delete") return renderDelete(props(), t, this.menu.handle);
-    return renderSettings(this.menu, t, name => setShared(THEME_KEY, name));
+    return renderSettings(this.menu, t, name => setShared(THEME_KEY, name), syntaxMode(), mode => setShared(SYNTAX_KEY, mode));
   }
 
   // --- File actions (right-click menu, F2, Delete) -----------------------------------
@@ -938,6 +956,10 @@ export default class Explorer extends View {
     if (this.menu) return this.renderMenu(theme());
     this.sync(cx);
     this.followTheme(cx);
+    // Open files are colored when they're read: a new syntax choice or appearance reads them again.
+    const syntax = `${syntaxMode()}-${settings().dark}`;
+    if (this.syntaxSeen !== undefined && syntax !== this.syntaxSeen) for (const tab of this.tabs) this.drop(tab.rel);
+    this.syntaxSeen = syntax;
     this.handleRequest(cx);
     // ctrl-shift-e shows the panel; give the tree the keyboard as it appears. The tab bar also
     // reopens it after a space switch, which must leave the keyboard in the terminal.
