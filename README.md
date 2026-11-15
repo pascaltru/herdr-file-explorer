@@ -21,11 +21,29 @@ file icons and git colors, and read-only editor tabs beside it, in the right-han
 
 ## Install
 
-Run `scripts/install.ps1` (or copy `mods/file-explorer` into `~/.config/herdr-app/mods/`), merge
-`keys.json` into yours, and point the `files` block of your layout's `panel` at the `file-explorer` mod.
-`ctrl-shift-e` toggles the panel and `ctrl-e` opens Quick Open. Both replace keys you may use:
-Herdr binds `ctrl-shift-e` to splitting a pane down, and terminal programs use `ctrl-e` to move to
-the end of the line (the End key does the same).
+**With an agent** (Herdr's usual way): in a terminal in Herdr, ask your coding agent:
+
+> Read ~/.config/herdr-app/AGENTS.md, then add this mod: https://github.com/pascaltru/herdr-file-explorer
+
+**By hand:**
+
+1. Copy `mods/file-explorer` into `~/.config/herdr-app/mods/`. On Windows, `scripts/install.ps1` does it
+   and runs `herdr-app check`. Copying by hand, copy `mod.json` first: Herdr docks a new mod folder into
+   the shown layout unless its `mod.json` is already there.
+2. Put it in a layout. Herdr's own layouts are read-only, so clone yours first, for example
+   `herdr-app do layout.clone '{"name":"main","as":"my-main"}'`. In the clone, the right-hand panel's
+   `files` block becomes `"content": { "mod": "file-explorer" }`. Any block works: the explorer finds
+   its place in the layout by itself.
+3. Merge `keys.json` into `~/.config/herdr-app/keys.json`:
+   - `ctrl-shift-e` toggles the node `panel` (the right-hand panel of Herdr's `main` layout; use your
+     node's id in another layout). It replaces Herdr's split-down binding.
+   - `ctrl-e` opens Quick Open. Terminal programs use it to move to the end of the line; the End key
+     does the same.
+
+**What it runs:** `git` in the space's repository. On Windows it also runs `powershell` to list folders
+git doesn't describe and for file actions (Recycle Bin, rename, reveal); on macOS and Linux it runs
+`sh`, `mv`, `mkdir`, `open`/`osascript` or `gio`/`xdg-open`. It reads the repository's files to show
+them, and writes only when you create or rename something. No network.
 
 ### Icon themes
 
