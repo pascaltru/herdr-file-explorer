@@ -178,7 +178,18 @@ function resolveIcon(icons, name, dir, open, light) {
 // Folders first, then names case-insensitively with digit runs padded, so "note2" sorts before
 // "note10". The key is computed once per entry: comparing with regular expressions instead cost
 // about 130 ms per refresh of a 1,400-file repository in Herdr's JavaScript engine.
-const sortKey = e => (e.dir ? "0" : "1") + e.name.toLowerCase().replace(/\d+/g, d => d.replace(/^0+/, "").padStart(12, "0"));
+const KEYS = new Map();
+function sortKey(e) {
+  const id = (e.dir ? "0" : "1") + e.name;
+  let key = KEYS.get(id);
+  if (key === undefined) {
+    // A tree rebuild makes new entries for the same names: compute each name's key once.
+    if (KEYS.size > 200000) KEYS.clear();
+    key = id[0] + e.name.toLowerCase().replace(/\d+/g, d => d.replace(/^0+/, "").padStart(12, "0"));
+    KEYS.set(id, key);
+  }
+  return key;
+}
 
 // Entries carry their key: an entry whose name or kind changes must be a new object.
 function sortEntries(list) {
@@ -390,6 +401,10 @@ export default class Explorer extends View {
     if (context.busy) return;
     context.busy = true;
     cx.spawn(async cx => {
+      // A mod's redraw repaints the whole window: only ask for one when something shown changed.
+      const seen = () => [this.version, this.marks, this.error, this.limited];
+      let before = seen();
+      const notifyIfChanged = () => { const now = seen(); if (now.some((v, i) => v !== before[i])) { before = now; cx.notify(); } };
       try {
         while (context.want && this.context === context) {
           const w = context.want; context.want = null;
@@ -397,7 +412,7 @@ export default class Explorer extends View {
           if (context.repo) {
             // git lists the whole repository in one quick call; only the folders it leaves out
             // (ignored, untracked) are read from disk, which on Windows means starting PowerShell.
-            if (w.all || w.git) { const changed = await this.status(context); if (this.context === context) await this.gitTree(context, changed); }
+            if (w.all || w.git) { const structure = await this.status(context); if (this.context === context) await this.gitTree(context, structure); }
             rels = rels.filter(r => this.isLazy(r));
             if (rels.length && this.context === context) await this.load(rels, context);
           } else {
@@ -405,15 +420,15 @@ export default class Explorer extends View {
             if (w.git && context.repo && this.context === context) await this.status(context);
           }
           if (this.context === context) this.error = null;
-          cx.notify();
+          notifyIfChanged();
           // Read one level ahead, so opening a folder shows its contents at once.
           if (!context.want && this.context === context) {
             const ahead = this.ahead();
-            if (ahead.length) { await this.load(ahead, context); cx.notify(); }
+            if (ahead.length) { await this.load(ahead, context); notifyIfChanged(); }
           }
         }
       } catch (e) { if (this.context === context) this.error = String(e?.message ?? e); }
-      finally { context.busy = false; cx.notify(); }
+      finally { context.busy = false; notifyIfChanged(); }
     });
   }
 
@@ -453,12 +468,12 @@ export default class Explorer extends View {
   // The repository's tree from `git ls-files`: tracked files (less those deleted on disk) and untracked
   // ones. A folder git doesn't list inside (an untracked folder, an ignored one from git status) is
   // "lazy": shown, and read from disk when opened.
-  async gitTree(context, statusChanged = true) {
+  async gitTree(context, structureChanged = true) {
     const r = await exec("git", ["--no-optional-locks", "ls-files", "-z", "-t", "-c", "-d", "-o", "--exclude-standard", "--directory"], { cwd: context.root, on: context.on, timeout: 60000 });
     if (r.code !== 0) throw new Error(r.stderr || "git ls-files failed");
     // Most changes an agent makes edit file contents: same file list, same ignored entries
-    // (from git status). Then there's nothing to rebuild, and nothing to redraw.
-    if (!statusChanged && r.stdout === context.treeOut) return;
+    // (from git status). Then there's nothing to rebuild, even when a file's git color changed.
+    if (!structureChanged && r.stdout === context.treeOut) return;
     context.treeOut = r.stdout;
     const items = r.stdout.split("\0"), removed = new Set();
     // -t tags each path: H tracked, R deleted on disk, S not checked out (sparse), ? untracked.
@@ -526,8 +541,11 @@ export default class Explorer extends View {
         if (RANK[mark] > (RANK[folders[folder]] ?? 0)) folders[folder] = mark;
       }
     }
+    // What the tree is built from (the ignored entries); the marks only change colors.
+    const structure = JSON.stringify(ignoredEntries), structureChanged = structure !== context.structure;
+    context.structure = structure;
     if (this.context === context) { this.marks = marks; this.folderMarks = folders; this.ignored = ignored; this.ignoredEntries = ignoredEntries; this.ignoredCache = new Map(); }
-    return true;
+    return structureChanged;
   }
 
   isIgnored(path) {
