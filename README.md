@@ -12,12 +12,17 @@ file icons and git colors, and read-only editor tabs beside it, in the right-han
   Copy Relative Path, Rename… (F2), Delete (Del, to the Recycle Bin or Trash after a confirmation),
   Reveal in File Explorer, Open in Terminal. Names are edited in place, as in VS Code.
   Spaces on another machine only offer the read-only actions.
+- **Quick Open** (`ctrl-e`): find a file of the repository by name with fuzzy matching; before typing,
+  the recently opened files. Enter opens it in the panel and reveals it in the tree.
+- **Syntax colors:** VS Code's Dark Modern and Light Modern palettes, or the Herdr theme's, from the gear menu.
 
 ## Install
 
 Run `scripts/install.ps1` (or copy `mods/file-explorer` into `~/.config/herdr-app/mods/`), merge
 `keys.json` into yours, and point the `files` block of your layout's `panel` at the `file-explorer` mod.
-`ctrl-shift-e` toggles the panel.
+`ctrl-shift-e` toggles the panel and `ctrl-e` opens Quick Open. Both replace keys you may use:
+Herdr binds `ctrl-shift-e` to splitting a pane down, and terminal programs use `ctrl-e` to move to
+the end of the line (the End key does the same).
 
 ### Icon themes
 

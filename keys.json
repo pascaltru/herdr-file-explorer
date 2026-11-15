@@ -1,5 +1,11 @@
 {
   "global": {
-    "ctrl-shift-e": { "command": "layout.toggle", "args": { "id": "panel" } }
+    "ctrl-shift-e": {
+      "command": "layout.toggle",
+      "args": {
+        "id": "panel"
+      }
+    },
+    "ctrl-e": "mod.open:file-explorer"
   }
 }

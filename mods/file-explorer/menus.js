@@ -9,7 +9,7 @@ import { trashName, revealLabel, reveal } from "./ops.js";
 export const NAME = "file-explorer", REQUEST = `${NAME}.request`;
 
 export function request(action, p, extra = {}) {
-  setShared(REQUEST, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, action, rel: p.rel, dir: p.dir, root: p.root, ...extra });
+  setShared(REQUEST, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now(), action, rel: p.rel, dir: p.dir, root: p.root, ...extra });
 }
 
 const close = () => closeOverlay(props().overlay);

@@ -6,6 +6,7 @@ import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, setting
 import * as fs from "fs/promises";
 import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
 import * as ops from "./ops.js";
+import { QuickOpen, remember } from "./quickopen.js";
 
 const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CACHE = "cache/file-explorer";
 const MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
@@ -170,6 +171,13 @@ export default class Explorer extends View {
       cx.spawn(async cx => { this.menu.themes = await listThemes(); this.menu.current ??= await preferredTheme(); cx.notify(); });
       return;
     }
+    // Opened by mod.open (Ctrl+E) with no menu named: Quick Open.
+    if (p?.overlay && !p.menu) {
+      this.roots = new Map(); this.icons = null;
+      cx.spawn(async cx => { this.icons = await loadIconTheme(await preferredTheme()); cx.notify(); });
+      this.quick = new QuickOpen(this, cx);
+      return;
+    }
     if (p?.menu === "context" || p?.menu === "delete") {
       this.menu = { kind: p.menu };
       if (p.menu === "delete") { this.menu.handle = cx.focus_handle(); this.menu.handle.focus(); }
@@ -199,6 +207,9 @@ export default class Explorer extends View {
   }
 
   windows(context = this.context) { return !context?.on && window()?.platform === "windows"; }
+
+  // Where the active space's terminal is (Quick Open asks, as the explorer does).
+  currentLocation() { return location(); }
 
   join(rel, context = this.context) {
     if (!rel) return context.root;
@@ -565,8 +576,24 @@ export default class Explorer extends View {
       else this.tabs.push(tab);
     }
     this.active = rel;
+    if (this.context) remember(this.context.root, rel);
     this.fit();
     cx.notify();
+  }
+
+  // Quick Open's choice: open the folders down to the file, select it, scroll to it, open it.
+  reveal(rel, cx) {
+    const parents = [];
+    for (let i = rel.indexOf("/"); i !== -1; i = rel.indexOf("/", i + 1)) parents.push(rel.slice(0, i));
+    const closed = parents.filter(f => !this.folders.has(f));
+    for (const f of closed) this.folders.add(f);
+    // Folders git doesn't list inside are read from disk; the rest are already known.
+    if (closed.length) this.reload(cx, closed, false);
+    this.version++;
+    this.open(rel, true, cx);
+    const i = this.flat().findIndex(r => r.path === rel);
+    if (i !== -1) this.ensureVisible(i);
+    this.h.focus();
   }
 
   closeTab(rel, cx) {
@@ -696,12 +723,18 @@ export default class Explorer extends View {
   handleRequest(cx) {
     const r = shared(REQUEST);
     if (!r || r.id === this.lastRequest) return;
+    // Quick Open can show the panel and ask at once: give the tree a few seconds to find its folder.
+    const fresh = Date.now() - (r.at ?? 0) < 5000;
+    if ((!this.context || r.root !== this.context.root) && fresh) return;
     this.lastRequest = r.id;
-    if (!this.context || r.root !== this.context.root || this.context.on) return;
+    if (!this.context || r.root !== this.context.root) return;
+    // Another machine's space only reads: no file changes there.
+    if (this.context.on && !["open", "reveal"].includes(r.action)) return;
     // Rendering is no place to change state: act right after. A timer rather than cx.spawn: the
     // edit schedules its own timer, which a finished task's context drops.
     cx.timer.after(0, cx => {
       if (r.action === "open") this.open(r.rel, true, cx);
+      else if (r.action === "reveal") this.reveal(r.rel, cx);
       else if (r.action === "rename") this.startRename(r.rel, cx);
       else if (r.action === "new-file" || r.action === "new-folder") this.startNew(r.folder ?? "", r.action === "new-folder", cx);
       else if (r.action === "delete") this.remove(r.rel, r.dir, cx);
@@ -1009,6 +1042,7 @@ export default class Explorer extends View {
   }
 
   render(cx) {
+    if (this.quick) return this.quick.render(theme());
     if (this.menu) return this.renderMenu(theme());
     this.sync(cx);
     this.followTheme(cx);

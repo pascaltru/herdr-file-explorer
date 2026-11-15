@@ -1,1 +1,1 @@
-{ "place": "none", "focusable": true, "cloned_from": { "name": "files", "version": "0.1.15" } }
+{ "place": "none", "focusable": true, "title": "Quick Open", "overlay": { "kind": "popup", "at": "top", "offset": 40, "width": 640, "height": 0.6 }, "cloned_from": { "name": "files", "version": "0.1.15" } }
