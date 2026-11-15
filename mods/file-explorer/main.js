@@ -98,15 +98,15 @@ function resolveIcon(icons, name, dir, open, light) {
   return icon;
 }
 
-function natural(a, b) {
-  const re = /(\d+)|(\D+)/g, xs = a.toLowerCase().match(re) ?? [], ys = b.toLowerCase().match(re) ?? [];
-  for (let i = 0; i < Math.min(xs.length, ys.length); i++) {
-    const p = xs[i], q = ys[i];
-    if (p === q) continue;
-    if (/^\d/.test(p) && /^\d/.test(q) && Number(p) !== Number(q)) return Number(p) - Number(q);
-    return p < q ? -1 : 1;
-  }
-  return xs.length - ys.length || (a < b ? -1 : a > b ? 1 : 0);
+// Folders first, then names case-insensitively with digit runs padded, so "note2" sorts before
+// "note10". The key is computed once per entry: comparing with regular expressions instead cost
+// about 130 ms per refresh of a 1,400-file repository in Herdr's JavaScript engine.
+const sortKey = e => (e.dir ? "0" : "1") + e.name.toLowerCase().replace(/\d+/g, d => d.replace(/^0+/, "").padStart(12, "0"));
+
+// Entries carry their key: an entry whose name or kind changes must be a new object.
+function sortEntries(list) {
+  for (const e of list) e.key ??= sortKey(e);
+  return list.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
 const quote = s => "'" + s.replace(/['‘’‚‛]/g, "$&$&") + "'";
@@ -296,7 +296,7 @@ export default class Explorer extends View {
           if (context.repo) {
             // git lists the whole repository in one quick call; only the folders it leaves out
             // (ignored, untracked) are read from disk, which on Windows means starting PowerShell.
-            if (w.all || w.git) { await this.status(context); if (this.context === context) await this.gitTree(context); }
+            if (w.all || w.git) { const changed = await this.status(context); if (this.context === context) await this.gitTree(context, changed); }
             rels = rels.filter(r => this.isLazy(r));
             if (rels.length && this.context === context) await this.load(rels, context);
           } else {
@@ -335,7 +335,7 @@ export default class Explorer extends View {
       const list = lists[i];
       if (list === null) { this.entries.delete(rel); if (rel) this.folders.delete(rel); return; }
       if (list.length > PER_FOLDER) this.limited = true;
-      this.entries.set(rel, list.slice(0, PER_FOLDER).sort((a, b) => Number(b.dir) - Number(a.dir) || natural(a.name, b.name)));
+      this.entries.set(rel, sortEntries(list.slice(0, PER_FOLDER)));
     });
     this.version++;
   }
@@ -345,9 +345,13 @@ export default class Explorer extends View {
   // The repository's tree from `git ls-files`: tracked files (less those deleted on disk) and untracked
   // ones. A folder git doesn't list inside (an untracked folder, an ignored one from git status) is
   // "lazy": shown, and read from disk when opened.
-  async gitTree(context) {
+  async gitTree(context, statusChanged = true) {
     const r = await exec("git", ["--no-optional-locks", "ls-files", "-z", "-t", "-c", "-d", "-o", "--exclude-standard", "--directory"], { cwd: context.root, on: context.on, timeout: 60000 });
     if (r.code !== 0) throw new Error(r.stderr || "git ls-files failed");
+    // Most changes an agent makes edit file contents: same file list, same ignored entries
+    // (from git status). Then there's nothing to rebuild, and nothing to redraw.
+    if (!statusChanged && r.stdout === context.treeOut) return;
+    context.treeOut = r.stdout;
     const items = r.stdout.split("\0"), removed = new Set();
     // -t tags each path: H tracked, R deleted on disk, S not checked out (sparse), ? untracked.
     for (const item of items) if (item.startsWith("R ")) removed.add(item.slice(2));
@@ -378,9 +382,9 @@ export default class Explorer extends View {
     for (const [folder, names] of tree) {
       // A lazy folder's contents were never listed by git: leave it for the disk.
       if (lazy.has(folder)) continue;
-      const list = [...names].map(([name, dir]) => ({ name, dir }));
+      const list = sortEntries([...names].map(([name, dir]) => ({ name, dir })));
       if (list.length > PER_FOLDER) limited = true;
-      entries.set(folder, list.slice(0, PER_FOLDER).sort((a, b) => Number(b.dir) - Number(a.dir) || natural(a.name, b.name)));
+      entries.set(folder, list.slice(0, PER_FOLDER));
     }
     this.lazy = lazy;
     // Keep what was already read from disk for lazy folders (an opened node_modules).
@@ -399,6 +403,9 @@ export default class Explorer extends View {
     const marks = {}, folders = {}, ignored = new Set(), ignoredEntries = [];
     // Writes nothing under .git (index lock, fsmonitor cookie): the folder watch would refresh again.
     const r = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--ignored=matching"], { cwd: context.root, on: context.on }).catch(() => null);
+    // Unchanged since last time: keep everything (and tell the tree its ignored entries are the same).
+    if (r?.code === 0 && r.stdout === context.statusOut) return false;
+    if (r?.code === 0) context.statusOut = r.stdout;
     // The root is the repository's top level, so git's paths are already relative to it.
     if (r?.code === 0) for (const entry of r.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
       const xy = entry.slice(0, 2), path = entry.slice(3).replace(/\/$/, "");
@@ -412,6 +419,7 @@ export default class Explorer extends View {
       }
     }
     if (this.context === context) { this.marks = marks; this.folderMarks = folders; this.ignored = ignored; this.ignoredEntries = ignoredEntries; this.ignoredCache = new Map(); }
+    return true;
   }
 
   isIgnored(path) {
@@ -468,7 +476,8 @@ export default class Explorer extends View {
     const now = Date.now(), double = this.lastClick?.path === path && now - this.lastClick.at < 400;
     this.lastClick = double ? null : { path, at: now };
     this.h.focus();
-    if (row.entry.dir) { if (!double) this.toggle(path, cx); }
+    // Every click toggles a folder, however fast: a double click is only a file's way to keep its tab.
+    if (row.entry.dir) this.toggle(path, cx);
     else this.open(path, double, cx);
   }
 
@@ -743,7 +752,7 @@ export default class Explorer extends View {
     edit.busy = true;
     const parent = edit.parent, rel = parent ? `${parent}/${name}` : name, before = [...(this.entries.get(parent) ?? [])];
     // Show the result at once: on Windows each operation starts PowerShell, about 0.3 s.
-    if (edit.kind === "rename") { this.setEntries(parent, before.map(e => (e.name === edit.name ? { ...e, name } : e))); this.moved(edit.rel, rel); }
+    if (edit.kind === "rename") { this.setEntries(parent, before.map(e => (e.name === edit.name ? { name, dir: e.dir } : e))); this.moved(edit.rel, rel); }
     else if (edit.dir) this.setEntries(parent, [...before, { name, dir: true }]);
     this.edit = null;
     this.selected = rel;
@@ -778,7 +787,7 @@ export default class Explorer extends View {
 
   // Changes a folder's listing in place, in the tree's order.
   setEntries(parent, list) {
-    this.entries.set(parent, list.sort((a, b) => Number(b.dir) - Number(a.dir) || natural(a.name, b.name)));
+    this.entries.set(parent, sortEntries(list));
     this.version++;
   }
 
