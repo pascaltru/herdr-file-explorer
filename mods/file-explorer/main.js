@@ -35,7 +35,19 @@ const TREE_WIDTH = 280, NARROW = 368, ROW = 24, PAGE = 10;
 // The key of the row where a new file or folder is named; real paths never hold "//".
 const NEW_ROW = "//new";
 const CONFLICTS = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]), RANK = { U: 1, A: 2, D: 3, M: 4, C: 5 };
-const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", cjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
+// Herdr's editor highlights a fixed set of languages, named by extension. A language it lacks is
+// shown as its nearest relative there, which colors at least comments, strings and numbers.
+// Tested: TypeScript, TOML, PowerShell, Terraform, Dockerfile, Kotlin and Swift show as plain text.
+const LANG = {
+  ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", cjs: "js", bicep: "js",
+  toml: "yaml", jsonc: "json", json5: "json", svelte: "html", vue: "html", razor: "html", cshtml: "html",
+  kt: "java", kts: "java", gradle: "java", swift: "rust",
+  ps1: "sh", psm1: "sh", psd1: "sh", dockerfile: "sh", env: "sh",
+  tf: "ruby", tfvars: "ruby", hcl: "ruby",
+  csproj: "xml", fsproj: "xml", vbproj: "xml", props: "xml", targets: "xml", xaml: "xml", resx: "xml", config: "xml", plist: "xml",
+};
+// Files known by their name rather than an extension.
+const LANG_BY_NAME = { dockerfile: "sh", containerfile: "sh", ".env": "sh" };
 const IMAGES = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]);
 
 // Mod panes have no folder, so the tree stays on the space's last focused terminal.
@@ -651,7 +663,8 @@ export default class Explorer extends View {
         if (text === null) { view.message = "This file no longer exists"; return; }
         if (text.includes("\0")) { view.message = "Binary file: no preview"; return; }
         const t = theme();
-        view.code = EditorState.new({ language: LANG[ext] ?? (ext || "txt"), readonly: true, value: text,
+        const language = LANG_BY_NAME[base(rel).toLowerCase()] ?? LANG[ext] ?? (ext || "txt");
+        view.code = EditorState.new({ language, readonly: true, value: text,
           font_family: settings().font_family, font_size: 13,
           syntax: syntaxColors(t) });
       } catch { if (this.views.get(rel) === view) view.message = "Can't preview this file: it's over 1 MB or unreadable"; }
