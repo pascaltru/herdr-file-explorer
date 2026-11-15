@@ -359,7 +359,8 @@ export default class Explorer extends View {
     const dirs = new Set();
     let all = false, git = false;
     for (const p of paths) {
-      const slash = p.replace(/\\/g, "/");
+      // Windows reports long-path forms (\\?\C:\x, \\?\UNC\server\share\x), which never match the root.
+      const slash = p.replace(/^\\\\\?\\UNC\\/i, "\\\\").replace(/^\\\\\?\\/, "").replace(/\\/g, "/");
       if (fold(slash) === rootKey) { all = true; break; }
       if (!fold(slash).startsWith(rootKey + "/")) continue;
       const rel = slash.slice(rootSlash.length + 1);
