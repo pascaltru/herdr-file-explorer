@@ -265,7 +265,7 @@ export default class Explorer extends View {
     this.entries = saved?.entries ?? new Map(); this.folders = saved?.folders ?? new Set(); this.marks = saved?.marks ?? {}; this.folderMarks = saved?.folderMarks ?? {}; this.ignored = saved?.ignored ?? new Set(); this.ignoredCache = new Map();
     this.ignoredEntries = saved?.ignoredEntries ?? []; this.deleted = saved?.deleted ?? new Set(); this.lazy = saved?.lazy ?? new Set();
     this.selected = saved?.selected ?? null; this.tabs = saved?.tabs ?? []; this.active = saved?.active ?? null;
-    this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.limited = false;
+    this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.cut = new Set(); this.gitLimited = false;
     this.version++;
   }
 
@@ -389,7 +389,7 @@ export default class Explorer extends View {
     context.busy = true;
     cx.spawn(async cx => {
       // A mod's redraw repaints the whole window: only ask for one when something shown changed.
-      const seen = () => [this.version, this.marks, this.error, this.limited];
+      const seen = () => [this.version, this.marks, this.error, this.gitLimited];
       let before = seen();
       const notifyIfChanged = () => { const now = seen(); if (now.some((v, i) => v !== before[i])) { before = now; cx.notify(); } };
       try {
@@ -445,7 +445,7 @@ export default class Explorer extends View {
         if (rel) this.folders.delete(rel);
         return;
       }
-      if (list.length > PER_FOLDER) this.limited = true;
+      if (list.length > PER_FOLDER) this.cut.add(rel); else this.cut.delete(rel);
       const fresh = sortEntries(list.slice(0, PER_FOLDER)), old = this.entries.get(rel);
       // Polling outside a repository reads the same folders every 10 seconds: keep what didn't change.
       if (old && old.length === fresh.length && fresh.every((e, j) => e.name === old[j].name && e.dir === old[j].dir)) return;
@@ -497,19 +497,21 @@ export default class Explorer extends View {
     for (const { path, dir } of this.ignoredEntries) { add(path, dir); if (dir) lazy.add(path); }
     if (this.context !== context) return;
     const entries = new Map();
-    let limited = count > MAX_GIT_PATHS;
+    const cut = new Set();
     for (const [folder, names] of tree) {
       // A lazy folder's contents were never listed by git: leave it for the disk.
       if (lazy.has(folder)) continue;
       const list = sortEntries([...names].map(([name, dir]) => ({ name, dir })));
-      if (list.length > PER_FOLDER) limited = true;
+      if (list.length > PER_FOLDER) cut.add(folder);
       entries.set(folder, list.slice(0, PER_FOLDER));
     }
     this.lazy = lazy;
     // Keep what was already read from disk for lazy folders (an opened node_modules).
     for (const [folder, list] of this.entries) if (!entries.has(folder) && this.isLazy(folder)) entries.set(folder, list);
     this.entries = entries;
-    this.limited = limited;
+    for (const folder of this.cut) if (entries.has(folder) && this.isLazy(folder)) cut.add(folder);
+    this.cut = cut;
+    this.gitLimited = count > MAX_GIT_PATHS;
     this.version++;
   }
 
@@ -1098,6 +1100,9 @@ export default class Explorer extends View {
     const context = this.context, rows = context ? this.flat() : [], focused = this.h.is_focused();
     const name = context?.root.split(/[\\/]/).filter(Boolean).pop() ?? "";
     const empty = this.error || (context && !this.entries.has("") ? "Loading files…" : context ? "No files" : "No folder");
+    // Only about what's on screen: Material's 1,000-icon folder, read ahead but closed, is no news.
+    const limit = this.gitLimited ? `Large repository: only its first ${MAX_GIT_PATHS.toLocaleString()} files are shown`
+      : [...this.cut].some(f => f === "" || this.folders.has(f)) ? `Some open folders show only their first ${PER_FOLDER} entries` : null;
     return v_flex().id("explorer-tree-column").h_full().min_h(0).flex_none()
       .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx))
       .when(this.tabs.length > 0, el => el.w(TREE_WIDTH).border_l(1).border_color(t.border)).when(!this.tabs.length, el => el.flex_1().min_w(0))
@@ -1111,7 +1116,7 @@ export default class Explorer extends View {
       .when(Boolean(this.edit?.error), el => el.child(div().px(12).py(6).flex_none().text_size(12).text_color(t.ansi1).border_t(1).border_color(t.border).child(this.edit.error)))
       .when(Boolean(this.error) || !rows.length, el => el.child(div().id("explorer-empty").p(12).text_size(12).text_color(t.dim)
         .on_mouse_down("right", (_e, cx) => this.contextMenu("", cx)).child(empty)))
-      .when(this.limited, el => el.child(div().px(12).py(6).flex_none().text_size(11).text_color(t.dim).child(`Some folders show only their first ${PER_FOLDER} entries`)));
+      .when(Boolean(limit), el => el.child(div().px(12).py(6).flex_none().text_size(11).text_color(t.dim).child(limit)));
   }
 
   editor(t, cx) {
