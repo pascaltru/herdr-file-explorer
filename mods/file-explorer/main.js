@@ -1,7 +1,7 @@
 // An IDE-style explorer for the space's repository: editor tabs on the left, the file tree on the right.
 // Derived from the Herdr app's `files` mod (Apache-2.0, see LICENSE-Herdr.txt) and modified; see NOTICE.
 import { View, div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, Scrollbar, v_virtual_list, VirtualListScrollHandle, Input, InputState } from "gpui-base";
+import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, run, appHome, layout, nextCommand, openOverlay, shared, setShared, props, notify } from "herdr";
 import * as fs from "fs/promises";
 import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
@@ -179,7 +179,7 @@ export default class Explorer extends View {
     this.lastRequest = shared(REQUEST)?.id ?? null;
     this.edit = null;
     this.saved = new Map(); this.roots = new Map(); this.context = null; this.locKey = null; this.wide = null;
-    this.h = cx.focus_handle(); this.scroll = VirtualListScrollHandle.new(); this.panelShown = null; this.icons = null;
+    this.h = cx.focus_handle(); this.panelShown = null; this.icons = null;
     this.themeLoading = true;
     cx.spawn(async cx => { this.icons = await loadIconTheme(await preferredTheme()); this.themeLoading = false; cx.notify(); });
     this.version = 0; this.flatCache = null; this.typed = ""; this.typedAt = 0; this.terminalPane = null;
@@ -487,12 +487,9 @@ export default class Explorer extends View {
     return rows;
   }
 
-  // on_item_click reports no click count, so a second click on the same row within 400 ms is a double click.
-  clicked(path, cx) {
+  clicked(path, cx, double) {
     const row = this.flat().find(r => r.path === path);
     if (!row || row.editing || (this.edit?.kind === "rename" && this.edit.rel === path)) return;
-    const now = Date.now(), double = this.lastClick?.path === path && now - this.lastClick.at < 400;
-    this.lastClick = double ? null : { path, at: now };
     this.h.focus();
     // Every click toggles a folder, however fast: a double click is only a file's way to keep its tab.
     if (row.entry.dir) this.toggle(path, cx);
@@ -505,7 +502,7 @@ export default class Explorer extends View {
     const i = Math.max(0, Math.min(rows.length - 1, index));
     if (!rows[i]) return;
     this.selected = rows[i].path;
-    this.scroll.scroll_to_item(i);
+    this.ensureVisible(i);
   }
 
   key(e, cx) {
@@ -862,20 +859,22 @@ export default class Explorer extends View {
     return icon.image ? image(icon.image).size(size).flex_none() : svg(icon.glyph).size(size).flex_none().text_color(icon.color ?? t.muted);
   }
 
-  row({ path, entry, depth, editing }, t, focused) {
+  row({ path, entry, depth, editing }, t, focused, hovered) {
     const naming = editing || (this.edit?.kind === "rename" && this.edit.rel === path);
     // A new entry's icon follows the name being typed.
     const shownName = editing ? this.edit.input.value() || (entry.dir ? "folder" : "file") : entry.name;
     const open = this.folders.has(path), selected = this.selected === path, icon = this.icon(shownName, entry.dir, open, 16, t);
     const mark = entry.dir ? this.folderMarks[path] : this.marks[path], ignored = !mark && this.isIgnored(path);
     const color = ignored ? t.dim : this.markColor(mark, t, t.foreground);
-    // Rows are drawn during layout, where handlers throw: clicks arrive through the list's on_item_click.
     // Indent guides: one line per ancestor level, through each folder's arrow column.
     const guides = [];
     for (let level = 0; level < depth; level++) guides.push(div().absolute().top(0).bottom(0).left(4 + level * 16 + 6).w(1).bg(t.border));
-    return h_flex().h(ROW).flex_none().mx(4).pl(4 + depth * 16).pr(8).gap(4).items_center().rounded(5).cursor_pointer().relative()
+    return h_flex().id(`row-${path}`).h(ROW).flex_none().mx(4).pl(4 + depth * 16).pr(8).gap(4).items_center().rounded(5).cursor_pointer().relative()
       .border_1().border_color(selected && focused ? t.accent : "#00000000")
-      .when(selected, el => el.bg(t.selected)).hover(s => s.bg(selected ? t.selected : t.hover))
+      // The hover highlight comes from the pointer's position (see pointerMoved), not GPUI's hover.
+      .when(selected, el => el.bg(t.selected)).when(hovered && !selected, el => el.bg(t.hover))
+      .on_click((e, cx) => this.clicked(path, cx, e.click_count >= 2))
+      .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.contextMenu(path, cx); })
       .children(guides)
       // Folders get arrows, as in VS Code; a theme without folder icons (Seti) shows only the arrow.
       .child(entry.dir ? svg(`${MOD}/ui/chevron-${open ? "down" : "right"}.svg`).size(14).flex_none().text_color(t.muted) : div().w(14).flex_none())
@@ -887,6 +886,72 @@ export default class Explorer extends View {
         : div().flex_1().min_w(0).truncate().text_color(color).child(entry.name))
       // VS Code marks files with a letter and folders holding changes with a dot.
       .when(Boolean(mark), el => el.child(div().flex_none().text_size(11).text_color(color).child(entry.dir ? "●" : mark)));
+  }
+
+  // --- The list -------------------------------------------------------------------------
+  // Herdr's virtual list can't give rows handlers of their own, and its rows can keep a hover
+  // highlight after the pointer has gone (Herdr drops some leave events). This list draws only the
+  // rows in view, in render, and lights the row under the pointer from the pointer's position.
+
+  zoom() { return Number(settings()?.zoom) || 1; }
+
+  maxScroll(count) { return Math.max(0, count * ROW - (this.listHeight ?? 0)); }
+
+  ensureVisible(i) {
+    const h = this.listHeight, top = this.scrollTop ?? 0;
+    if (!h) return;
+    if (i * ROW < top) this.scrollTop = i * ROW;
+    else if ((i + 1) * ROW > top + h) this.scrollTop = (i + 1) * ROW - h;
+  }
+
+  hoveredRow() {
+    return this.pointerY === undefined ? -1 : Math.floor((this.pointerY + (this.scrollTop ?? 0)) / ROW);
+  }
+
+  pointerMoved(e, cx) {
+    this.pointerBounds = e.bounds;
+    const before = this.hoveredRow();
+    this.pointerY = e.local_position.y / this.zoom();
+    if (this.hoveredRow() !== before) cx.notify();
+    if (this.hoverWatch) return;
+    // A missed leave event would keep a row lit: while the pointer is over the list, check it's still there.
+    this.hoverWatch = cx.timer.every(120, cx => {
+      const p = globalThis.window?.mouse_position?.(), b = this.pointerBounds;
+      if (p && b && p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height) return;
+      this.pointerLeft(cx);
+    });
+  }
+
+  pointerLeft(cx) {
+    this.hoverWatch?.cancel();
+    this.hoverWatch = null;
+    if (this.pointerY === undefined) return;
+    this.pointerY = undefined;
+    cx.notify();
+  }
+
+  list(rows, t, focused) {
+    const count = rows.length, h = this.listHeight, max = this.maxScroll(count);
+    const top = (this.scrollTop = Math.max(0, Math.min(this.scrollTop ?? 0, max)));
+    // Until the list is measured, draw a tall screen's worth.
+    const first = Math.floor(top / ROW), end = Math.min(count, Math.ceil((top + (h ?? 2000)) / ROW) + 1);
+    const hovered = this.hoveredRow(), drawn = [];
+    for (let i = first; i < end; i++) drawn.push(this.row(rows[i], t, focused, i === hovered).absolute().left(0).right(0).top(i * ROW - top));
+    const thumb = h && max > 0 ? Math.max(24, (h * h) / (count * ROW)) : 0;
+    return div().id("explorer-list").flex_1().min_h(0).relative().overflow_hidden()
+      .on_size_change((size, cx) => { const height = size.height / this.zoom(); if (height !== this.listHeight) { this.listHeight = height; cx.notify(); } })
+      .on_mouse_move((e, cx) => this.pointerMoved(e, cx))
+      .on_hover((on, cx) => { if (!on) this.pointerLeft(cx); })
+      // From the scroll as it is now: a trackpad sends several events between two renders.
+      .on_scroll_wheel((e, cx) => {
+        cx.stop_propagation();
+        const next = Math.max(0, Math.min((this.scrollTop ?? 0) - e.delta.y / this.zoom(), this.maxScroll(count)));
+        if (next !== this.scrollTop) { this.scrollTop = next; cx.notify(); }
+      })
+      // Rows stop their own right-click: one reaching here was on empty space, meaning the root.
+      .on_mouse_down("right", (_e, cx) => this.contextMenu("", cx))
+      .children(drawn)
+      .when(thumb > 0, el => el.child(div().absolute().right(2).w(6).rounded(3).bg(t.border).h(thumb).top((top / max) * (h - thumb))));
   }
 
   tree(t) {
@@ -902,16 +967,7 @@ export default class Explorer extends View {
         .child(div().id("explorer-settings").w(24).h(24).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
           .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => this.openSettings()).child(svg(`${MOD}/ui/settings.svg`).size(14))))
-      .when(rows.length > 0, el => el.child(div().id("explorer-tree-area").flex_1().min_h(0).relative().pt(4)
-        // A right-click on a row reaches the row's handler first, then this one: only empty space means the root.
-        .on_mouse_down("right", (_e, cx) => { if (Date.now() - (this.rowMenuAt ?? 0) > 100) this.contextMenu("", cx); })
-        // Only the rows on screen are built, so a large repository stays smooth.
-        .child(v_virtual_list("explorer-tree", rows.length, ROW, i => rows[i]?.path ?? String(i),
-          range => rows.slice(range.start, range.end).map(r => this.row(r, t, focused)))
-          .on_item_click((path, cx) => this.clicked(path, cx))
-          .on_item_secondary_click((path, _e, cx) => { this.rowMenuAt = Date.now(); this.contextMenu(path, cx); })
-          .track_scroll(this.scroll).size_full())
-        .child(Scrollbar.vertical("explorer-tree").viewport_from_layout().absolute().inset_0())))
+      .when(rows.length > 0, el => el.child(this.list(rows, t, focused)))
       .when(Boolean(this.edit?.error), el => el.child(div().px(12).py(6).flex_none().text_size(12).text_color(t.ansi1).border_t(1).border_color(t.border).child(this.edit.error)))
       .when(Boolean(this.error) || !rows.length, el => el.child(div().id("explorer-empty").p(12).text_size(12).text_color(t.dim)
         .on_mouse_down("right", (_e, cx) => this.contextMenu("", cx)).child(empty)))
