@@ -291,6 +291,9 @@ export default class Explorer extends View {
     this.locKey = k;
     if (!loc.cwd) { this.switchTo(null, null, false, cx); return; }
     cx.spawn(async cx => {
+      // A task that ends without ever waiting (a root already resolved) gives the tasks it starts
+      // a context whose cx.notify() is dropped: live refresh would stop after a space switch.
+      await cx.sleep(0);
       const { root, repo } = await this.resolveRoot(loc.cwd, loc.on);
       if (this.locKey !== k) return;
       this.switchTo(root, loc.on, repo, cx);
