@@ -539,12 +539,16 @@ export default class Explorer extends View {
     if (r?.code === 0 && r.stdout === context.statusOut) return false;
     if (r?.code === 0) context.statusOut = r.stdout;
     // The root is the repository's top level, so git's paths are already relative to it.
-    if (r?.code === 0) for (const entry of r.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
+    let count = 0;
+    if (r?.code === 0) for (const entry of r.stdout.split("\0")) {
+      if (!entry) continue;
       const xy = entry.slice(0, 2), path = entry.slice(3).replace(/\/$/, "");
-      // --ignored=matching names an ignored folder once, with a trailing slash.
+      // --ignored=matching names an ignored folder once, with a trailing slash. Never capped: a big
+      // untracked folder listed first would otherwise push node_modules out of the tree.
       if (xy === "!!") { ignored.add(path); ignoredEntries.push({ path, dir: entry.endsWith("/") }); continue; }
       // Deleted on disk but still in the index: ls-files lists it, the tree leaves it out.
       if (xy[1] === "D") deleted.add(path);
+      if (++count > MAX_GIT_PATHS) continue;
       const mark = CONFLICTS.has(xy) ? "C" : xy === "??" ? "U" : xy.includes("A") ? "A" : xy.includes("D") ? "D" : "M";
       marks[path] = mark;
       for (let i = path.lastIndexOf("/"); i > 0; i = path.lastIndexOf("/", i - 1)) {
