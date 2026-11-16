@@ -942,7 +942,7 @@ export default class Explorer extends View {
   showGoTo(cx) {
     const code = this.activeCode();
     if (!code) return false;
-    this.findBar.open = false;
+    this.findBar.forget();
     this.goto.show(code, cx);
     return true;
   }
@@ -978,7 +978,7 @@ export default class Explorer extends View {
   closeTab(rel, cx, force = false) {
     const i = this.tabs.findIndex(t => t.rel === rel);
     if (i === -1) return;
-    if (!force && (this.views.get(rel)?.dirty || this.drafts.has(rel))) {
+    if (!force && this.unsaved(rel)) {
       openUnsavedDialog({ rel, dir: false, root: this.context?.root });
       return;
     }
@@ -1000,7 +1000,11 @@ export default class Explorer extends View {
       saved: this.tabs.some(t => !this.unsaved(t.rel)) });
   }
 
-  unsaved(rel) { return Boolean(this.views.get(rel)?.dirty || this.drafts.has(rel)); }
+  unsaved(rel) {
+    const view = this.views.get(rel);
+    if (view) this.settle(view);
+    return Boolean(view?.dirty || this.drafts.has(rel));
+  }
 
   // Close asks about unsaved edits, as × does. The others close what's saved and leave tabs with
   // unsaved edits open (a toast says how many), rather than asking once per file.
@@ -1085,6 +1089,7 @@ export default class Explorer extends View {
   // A view with unsaved edits leaves its text behind as a draft, which the next view of the file
   // starts from: switching space, a new font or colors, or a catch-up recreate views.
   release(view, rel) {
+    if (rel) this.settle(view);
     if (rel && view.code && view.dirty) this.drafts.set(rel, { text: view.code.value(), base: view.base, crlf: view.crlf });
     view.code?.release();
     if (view.picture) fs.unlink(`${appHome()}/${view.picture}`).catch(() => {});
@@ -1108,14 +1113,40 @@ export default class Explorer extends View {
       const disk = await readTextFile(this.join(rel, context), { on: context.on }).catch(() => null);
       if (this.context !== context || this.views.get(rel) !== view) return;
       if (disk === view.base) return;
+      this.settle(view);
       if (view.dirty) view.conflict = true;
       else this.drop(rel);
       cx.notify();
     });
   }
 
+  // Each edit: a clean tab turns modified at once. The full comparison copies the whole text (and,
+  // for a CRLF file, converts it), so it waits for typing to pause; it only matters to clear the dot
+  // when an undo brings the text back.
+  onEdit(rel, view, cx) {
+    if (!view.dirty) {
+      view.dirty = true;
+      // Editing keeps a preview tab, as in VS Code.
+      const tab = this.tabs.find(t => t.rel === rel);
+      if (tab) tab.preview = false;
+      cx.notify();
+    }
+    view.pending = true;
+    const seq = view.editSeq = (view.editSeq ?? 0) + 1;
+    cx.timer.after(300, cx => { if (view.editSeq === seq && this.views.get(rel) === view) this.edited(rel, view, cx); });
+  }
+
   // Unsaved edits: the text compared with what was read or last saved, line endings as the file has them.
+  // A comparison still waiting for typing to pause, done now: closing, saving, stashing a draft or a
+  // change on disk must not act on a dot an undo has already made wrong.
+  settle(view) {
+    if (!view.pending || !view.code) return;
+    view.pending = false;
+    view.dirty = this.fileText(view) !== view.base;
+  }
+
   edited(rel, view, cx) {
+    view.pending = false;
     const dirty = this.fileText(view) !== view.base;
     if (dirty === view.dirty) return;
     view.dirty = dirty;
@@ -1142,6 +1173,7 @@ export default class Explorer extends View {
       cx.notify();
       return;
     }
+    if (view) this.settle(view);
     if (!view?.code || !view.editable || (!view.dirty && !force)) return;
     const path = this.join(rel, context), text = this.fileText(view);
     try {
@@ -1201,7 +1233,7 @@ export default class Explorer extends View {
         view.code.on("change", (_e, cx) => {
           if (this.views.get(rel) !== view) return;
           this.endStepping(cx);
-          this.edited(rel, view, cx);
+          this.onEdit(rel, view, cx);
         });
         cx.notify();
         await this.applyJump(rel, cx);

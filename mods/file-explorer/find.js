@@ -108,8 +108,13 @@ export class FindBar {
   }
 
   hide(cx) {
-    this.open = false; this.stepping = false;
+    this.forget();
     cx.notify();
+  }
+
+  // Closed: the file's text and editor aren't kept (up to 1 MB, and a released editor).
+  forget() {
+    this.open = false; this.stepping = false; this.source = null; this.matches = []; this.index = -1;
   }
 
   focusInput() {
@@ -120,13 +125,15 @@ export class FindBar {
   // The match offsets, recomputed when the file, the query or the case setting changed.
   find() {
     const code = this.explorer.activeCode(), text = code?.value() ?? "", query = this.input.value();
-    const s = this.source;
-    if (s && s.code === code && s.text === text && s.query === query && s.caseSensitive === this.caseSensitive) return;
-    const hay = this.caseSensitive ? text : text.toLowerCase(), needle = this.caseSensitive ? query : query.toLowerCase();
+    const s = this.source, sameText = Boolean(s && s.code === code && s.text === text);
+    if (sameText && s.query === query && s.caseSensitive === this.caseSensitive) return;
+    // Lowercasing a large file costs more than the search: reused while only the query changes.
+    const lower = this.caseSensitive ? (sameText ? s.lower : null) : sameText && s.lower ? s.lower : text.toLowerCase();
+    const hay = this.caseSensitive ? text : lower, needle = this.caseSensitive ? query : query.toLowerCase();
     const matches = [];
     for (let i = needle ? hay.indexOf(needle) : -1; i !== -1 && matches.length < MAX_MATCHES; i = hay.indexOf(needle, i + needle.length)) matches.push(i);
     this.matches = matches;
-    this.source = { code, text, query, caseSensitive: this.caseSensitive };
+    this.source = { code, text, lower, query, caseSensitive: this.caseSensitive };
   }
 
   firstFrom(offset) {

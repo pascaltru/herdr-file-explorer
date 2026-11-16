@@ -14,20 +14,23 @@ export function newSearch(scope = "") {
     ran: false, folded: new Set(), selected: -1, seq: 0, version: 0 };
 }
 
-// Where `needle` occurs in `text`, then the text cut to a window around the first one (minified files
-// have very long lines), with leading indentation dropped.
+// The text cut to a window around the first match (minified files have megabyte lines), with leading
+// indentation dropped, and the matches inside that window. Only the window is lowercased and searched;
+// the first match is found with a case-insensitive regex instead of lowercasing the whole line.
 function excerpt(text, needle, caseSensitive) {
-  const hay = caseSensitive ? text : text.toLowerCase(), find = caseSensitive ? needle : needle.toLowerCase();
-  const spans = [];
-  for (let i = hay.indexOf(find); i !== -1 && find; i = hay.indexOf(find, i + find.length)) spans.push(i);
-  const col = (spans[0] ?? 0) + 1;
+  const find = caseSensitive ? needle : needle.toLowerCase();
+  const first = !needle ? -1 : caseSensitive ? text.indexOf(needle)
+    : text.search(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
   const indent = text.length - text.trimStart().length;
-  let from = Math.max(indent, Math.min(spans[0] ?? 0, text.length) - 60);
-  let shown = text.slice(from, from + MAX_LINE), lead = 0;
-  if (from > indent) { shown = "…" + shown; lead = 1; }
-  if (from + MAX_LINE < text.length) shown += "…";
-  const marks = spans.map(s => [s - from + lead, s - from + lead + find.length]).filter(([s, e]) => s >= lead && e <= shown.length);
-  return { text: shown, marks, col };
+  const from = Math.max(indent, Math.min(Math.max(first, 0), text.length) - 60);
+  const window = text.slice(from, from + MAX_LINE), hay = caseSensitive ? window : window.toLowerCase();
+  const lead = from > indent ? 1 : 0;
+  const shown = (lead ? "…" : "") + window + (from + MAX_LINE < text.length ? "…" : "");
+  const marks = [];
+  for (let i = find ? hay.indexOf(find) : -1; i !== -1; i = hay.indexOf(find, i + find.length)) {
+    if (i + find.length <= window.length) marks.push([i + lead, i + lead + find.length]);
+  }
+  return { text: shown, marks, col: Math.max(first, 0) + 1 };
 }
 
 export class FolderSearch {
