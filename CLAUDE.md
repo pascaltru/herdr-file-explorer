@@ -58,7 +58,8 @@ behavior changes.
 - **Drawing rules:**
   - No state creation in a render: no `InputState.new` or `cx.focus_handle()`.
   - Defer with `cx.timer.after(0, cx => …)`; a finished `cx.spawn` drops the timers it scheduled.
-  - Never keep a `cx` for later; each callback gets its own.
+  - Never keep a `cx` for later; each callback gets its own. That includes an event handler's `cx`
+    after an `await`: its `notify()` is dropped. Wait inside `cx.spawn(async cx => …)` instead.
   - A `cx.spawn` body that never really waits (only cached values) gives the tasks it starts a
     `cx` whose `notify()` is dropped. `await cx.sleep(0)` first (see `sync`).
 - **Tree drawing:** rows inside a virtual list can't have click handlers, so the tree draws its own

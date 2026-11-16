@@ -45,7 +45,13 @@ export class FolderSearch {
     this.cache = null;
   }
 
-  async run(cx) {
+  // From an event (Enter, Aa, the scope's ×): its cx is gone once git answers, so the search runs
+  // in a task with its own.
+  run(cx) {
+    cx.spawn(async cx => { await this.search(cx); });
+  }
+
+  async search(cx) {
     const s = this.ex.folderSearch, context = this.ex.context, query = this.input.value();
     if (!s || !context) return;
     s.text = query;
