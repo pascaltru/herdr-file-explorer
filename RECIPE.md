@@ -66,6 +66,28 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
     match. Quick Open clears the filter when it would hide the chosen file.
   - The filter, like open folders and tabs, belongs to the space's folder: switching space and back
     restores it.
+- **Search in folder** (as Zed's project search):
+  - `ctrl+shift+f` from anywhere in the explorer, or right-click a folder or empty space → Find in
+    Folder… (scoped to that folder; works on another machine's space too).
+  - The panel's Search view, under its header: the box with a match-case toggle (`Aa`), a removable
+    scope chip (`in mods/file-explorer ×`), a summary ("4 results in 3 files", or "Showing the first
+    2,000 of 3,867 results, in 1,364 files") and Clear, which empties the view.
+  - Enter runs `git --literal-pathspecs grep -n -I --null --untracked -F [-i] -e <query> -- [scope]`:
+    plain text, tracked and untracked files, not ignored ones. Results stay until the next run.
+  - Results grouped by file: a header (chevron to fold, icon, name, folder, count), then each line with
+    its number and the matches on the `selection` color, in the editor font, cut to 300 characters
+    around the first match.
+  - A click, or Down from the box then arrows and Enter, opens the file in a preview tab with the
+    match selected in the middle of the editor. A double click keeps the tab (the second click
+    within 500 ms on the same row: a list's clicks carry no count).
+  - A word selected in the open file fills the box. The results, and which view shows, belong to the
+    space's folder, like its tabs. Outside a repository it says it needs one.
+- **Bottom tabs** (as Visual Studio's tool windows): a 30px strip on `chrome` with Explorer (the tree and
+  its toolbar) and Search. The shown one hangs from the panel on `background`: open at the top (the
+  strip's top line is drawn in pieces around it), straight `border` sides the strip's full height.
+  Search is `dim` until a search has run, and still opens the view.
+- **Width:** with files open, the editor and the panel are an `h_resizable` pair: the line between them
+  drags (200px to 1,200px). The panel starts at 280px; Herdr keeps a dragged width for the window.
 - **Dragging** a file or folder onto a terminal types its quoted path there, without Enter
   (Herdr's `drag_paths`). Dropping anywhere else does nothing. A row being renamed and a file deleted
   on disk can't be dragged.
@@ -122,6 +144,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - `ops.js`: file actions
   - `quickopen.js`: Quick Open
   - `find.js`: go to line
+  - `search.js`: search in folder (the panel's Search view)
   - `place.js`: layout lookups
   - `icon-themes/`: Seti and Material, VS Code icon-theme JSON plus SVGs, and VS Code's
     extension-to-language table
@@ -138,7 +161,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - shared state: `file-explorer.iconTheme`, `.syntax`, `.font`, `.fontSize`, `.recent`, `.request`
 - **Programs:**
   - `git`: `rev-parse`, `ls-files -t -c -o --exclude-standard --directory` and `status --porcelain=v1
-    --ignored=matching`, run in parallel
+    --ignored=matching`, run in parallel; `grep` for search in folder
   - on Windows, `powershell` lists folders git doesn't describe and performs file actions: `New-Item`,
     `Rename-Item`, Recycle Bin through `Microsoft.VisualBasic`, and `explorer /select`
   - on macOS and Linux, `sh` lists folders; `mkdir`/`mv`, `osascript`/`open` or `gio`/`xdg-open`

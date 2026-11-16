@@ -69,6 +69,7 @@ export function contextItems(p) {
   if (p.rel) items.push({ id: "copy-relative", label: "Copy Relative Path" });
   if (local && p.rel) items.push("-", { id: "rename", label: "Rename…", hint: "F2" }, { id: "delete", label: "Delete", hint: "Del" });
   if (local) items.push("-", { id: "reveal", label: revealLabel() }, { id: "terminal", label: "Open in Terminal" });
+  if (p.dir || !p.rel) items.push("-", { id: "find-in-folder", label: "Find in Folder…", hint: "Ctrl+Shift+F" });
   // No separator first, last or twice in a row.
   return items.filter((it, i, all) => it !== "-" || (i > 0 && i < all.length - 1 && all[i - 1] !== "-"));
 }
@@ -84,6 +85,7 @@ export function renderContext(p, t) {
     const parentDir = p.full.slice(0, Math.max(p.full.lastIndexOf("/"), p.full.lastIndexOf("\\")));
     switch (id) {
       case "open": case "rename": request(id, p); break;
+      case "find-in-folder": request(id, p, { folder: p.rel }); break;
       // New entries go inside a folder, or beside a file.
       case "new-file": case "new-folder": request(id, p, { folder: p.dir ? p.rel : p.rel.slice(0, Math.max(p.rel.lastIndexOf("/"), 0)) }); break;
       case "delete": openDeleteDialog(p); break;

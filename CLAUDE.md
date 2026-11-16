@@ -11,7 +11,8 @@ behavior changes.
 - `menus.js` — gear menu, right-click menu, delete dialog (this mod as an overlay, `props().menu`);
   they reach the explorer through a shared request (`Explorer.handleRequest`).
 - `ops.js` — file operations (PowerShell on Windows, usual tools elsewhere); `quickopen.js` — Quick Open;
-  `find.js` — go to line; `place.js` — finds the explorer's block in the layout.
+  `find.js` — go to line; `search.js` — search in folder (the panel's Search view);
+  `place.js` — finds the explorer's block in the layout.
 - `icon-themes/` is generated: never hand-edit; run `python scripts/build-icon-themes.py`
   (`--material <ver>` / `--vscode <ver>` to bump; versions pinned in `versions.json`).
 

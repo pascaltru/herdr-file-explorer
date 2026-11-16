@@ -1,7 +1,7 @@
 // An IDE-style explorer for the space's repository: editor tabs on the left, the file tree on the right.
 // Derived from the Herdr app's `files` mod (Apache-2.0, see LICENSE-Herdr.txt) and modified; see NOTICE.
 import { View, div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
+import { v_flex, h_flex, Editor, EditorState, Input, InputState, h_resizable, resizable_panel } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify, checking } from "herdr";
 import * as fs from "fs/promises";
 import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
@@ -9,6 +9,7 @@ import * as ops from "./ops.js";
 import { QuickOpen, remember } from "./quickopen.js";
 import { shownIn, sizedNode } from "./place.js";
 import { GoToLine, offsetOf } from "./find.js";
+import { FolderSearch, newSearch } from "./search.js";
 
 const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CACHE = "cache/file-explorer";
 const MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
@@ -263,6 +264,7 @@ export default class Explorer extends View {
     this.search.on("submit", (_e, cx) => this.intoResults(cx));
     // A jump waits here until its file's editor exists (a tab opened from a search result reads first).
     this.goto = new GoToLine(this); this.pendingJump = null;
+    this.modPath = MOD; this.finder = new FolderSearch(this, cx);
     // Remote spaces can't be watched, and a failed watch falls back to polling.
     // Herdr keeps a hidden panel's mod running: it refreshes once shown again instead (see render).
     cx.timer.every(10000, cx => {
@@ -271,7 +273,14 @@ export default class Explorer extends View {
       if (shownIn()) this.reload(cx, null, true); else context.missed = true;
     });
     // pane.go (alt+arrows) hands the keyboard to this panel.
-    cx.spawn(async cx => { for (;;) { const c = await nextCommand(); if (c === "focus") this.h.focus(); cx.notify(); } });
+    // The copy gets "focus" when a popup over it closes: after Find in Folder…, the search box keeps it.
+    cx.spawn(async cx => {
+      for (;;) {
+        const c = await nextCommand();
+        if (c === "focus") { const want = this.wantFocus; this.wantFocus = null; if (want) want(); else this.h.focus(); }
+        cx.notify();
+      }
+    });
   }
 
   reset(saved) {
@@ -284,6 +293,9 @@ export default class Explorer extends View {
     this.query = saved?.query ?? ""; this.changesOnly = saved?.changesOnly ?? false;
     this.filterClosed = saved?.filterClosed ?? new Set(); this.filterOpened = saved?.filterOpened ?? new Set(); this.startClosed = new Set();
     this.search?.set_value(saved?.searchText ?? "");
+    // The search tab's query and results (search.js).
+    this.folderSearch = saved?.folderSearch ?? null; this.panelView = saved?.panelView ?? "files";
+    this.finder?.input.set_value(this.folderSearch?.text ?? "");
     this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.cut = new Set(); this.gitLimited = false;
     this.version++;
   }
@@ -342,7 +354,8 @@ export default class Explorer extends View {
     if (old) {
       for (const view of this.views.values()) this.release(view);
       this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, deleted: this.deleted, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active,
-        query: this.query, searchText: this.search.value(), changesOnly: this.changesOnly, filterClosed: this.filterClosed, filterOpened: this.filterOpened });
+        query: this.query, searchText: this.search.value(), changesOnly: this.changesOnly, filterClosed: this.filterClosed, filterOpened: this.filterOpened,
+        folderSearch: this.folderSearch, panelView: this.panelView });
     }
     if (!root) { this.context = null; this.reset(); this.fit(); return; }
     this.reset(this.saved.get(`${on ?? ""}|${root}`));
@@ -735,6 +748,7 @@ export default class Explorer extends View {
       return;
     }
     if (this.editorKey(e, cx)) return;
+    if (this.panelView === "search") { if (this.finder.key(e, cx)) { cx.stop_propagation(); cx.notify(); } return; }
     const rows = this.flat(), i = rows.findIndex(r => r.path === this.selected), row = rows[i];
     let handled = true;
     switch (e.key) {
@@ -766,6 +780,7 @@ export default class Explorer extends View {
   editorKey(e, cx) {
     const m = e.modifiers;
     if (e.key === "g" && m.control && !m.shift && !m.alt && this.showGoTo(cx)) { cx.stop_propagation(); return true; }
+    if (e.key === "f" && m.control && m.shift && !m.alt && this.context) { this.openSearch(null, cx); cx.stop_propagation(); return true; }
     if (e.key === "escape" && this.goto.open) {
       this.goto.hide(cx);
       this.views.get(this.active)?.code?.focus();
@@ -873,9 +888,43 @@ export default class Explorer extends View {
     cx.notify();
   }
 
+  hasTabs() { return this.tabs.length > 0; }
+
+  // Ctrl+Shift+F, or Find in Folder… (`scope`: a folder, "" for all; null keeps the last one).
+  openSearch(scope, cx) {
+    if (!this.context) return;
+    const s = this.folderSearch ??= newSearch(scope ?? "");
+    if (scope !== null && scope !== s.scope) { s.scope = scope; s.version++; }
+    // A word selected in the open file is what you're looking for, as in VS Code.
+    const code = this.active ? this.views.get(this.active)?.code : null;
+    const range = code?.selected_range(), picked = range && range.end > range.start ? code.value().slice(range.start, range.end) : "";
+    if (picked && !picked.includes("\n") && picked.length <= 200) s.text = picked;
+    this.finder.input.set_value(s.text);
+    this.panelView = "search";
+    this.finder.focusInput();
+    // The box is drawn after this: ask again once it's there.
+    cx.timer.after(50, () => this.finder.focusInput());
+    cx.notify();
+  }
+
+  // Clear: the Search tab goes dim again, and the view stays, empty, for a new query.
+  closeSearch(cx) {
+    this.folderSearch = newSearch();
+    this.finder.input.set_value("");
+    this.finder.focusInput();
+    cx.notify();
+  }
+
+  // The panel's bottom tabs: the tree ("files") or search in folder ("search").
+  showPanelView(view, cx) {
+    this.panelView = view;
+    if (view === "search") this.openSearch(null, cx);
+    else { this.h.focus(); cx.notify(); }
+  }
+
   // The panel is as wide as an editor while files are open, and as narrow as a tree otherwise.
   fit() {
-    const wide = this.tabs.length > 0, node = sizedNode();
+    const wide = this.hasTabs(), node = sizedNode();
     if (wide === this.wide || !node) return;
     this.wide = wide;
     run("layout.resize", wide ? { id: node.id, weight: 1.2 } : { id: node.id, px: NARROW });
@@ -1006,7 +1055,7 @@ export default class Explorer extends View {
     this.lastRequest = r.id;
     if (!this.context || r.root !== this.context.root) return;
     // Another machine's space only reads: no file changes there.
-    if (this.context.on && !["open", "reveal"].includes(r.action)) return;
+    if (this.context.on && !["open", "reveal", "find-in-folder"].includes(r.action)) return;
     // Rendering is no place to change state: act right after. A timer rather than cx.spawn: the
     // edit schedules its own timer, which a finished task's context drops.
     cx.timer.after(0, cx => {
@@ -1015,6 +1064,11 @@ export default class Explorer extends View {
       else if (r.action === "rename") this.startRename(r.rel, cx);
       else if (r.action === "new-file" || r.action === "new-folder") this.startNew(r.folder ?? "", r.action === "new-folder", cx);
       else if (r.action === "delete") this.remove(r.rel, r.dir, cx);
+      else if (r.action === "find-in-folder") {
+        this.openSearch(r.folder ?? "", cx);
+        // The closing menu hands the copy "focus" afterwards: keep it in the search box.
+        this.wantFocus = () => this.finder.focusInput();
+      }
       cx.notify();
     });
   }
@@ -1288,21 +1342,38 @@ export default class Explorer extends View {
     // Only about what's on screen: Material's 1,000-icon folder, read ahead but closed, is no news.
     const limit = this.gitLimited ? `Large repository: only its first ${MAX_GIT_PATHS.toLocaleString()} files are shown`
       : [...this.cut].some(f => f === "" || this.folders.has(f)) ? `Some open folders show only their first ${PER_FOLDER} entries` : null;
-    return v_flex().id("explorer-tree-column").h_full().min_h(0).flex_none()
+    const searching = this.panelView === "search" && Boolean(context && this.folderSearch);
+    // Visual Studio's tool window tabs: the shown one hangs from the panel, open at the top and
+    // outlined below; Search is dim until a search has run. The strip's top line is drawn piece by
+    // piece around it, since a border paints over what's inside it.
+    const line = el => el.h_full().border_t(1).border_color(t.border);
+    // The panel's own edges are the first tab's left and every tab's bottom: no second line there.
+    const bottomTab = (id, label, on, lit, view, first) => div().id(id).px(16).flex().items_center().cursor_pointer().text_size(12)
+      .when(on, el => el.h_full().bg(t.background).border_r(1).when(!first, el => el.border_l(1)).border_color(t.border))
+      .when(!on, el => el.h_full().border_t(1).border_color(t.border))
+      .text_color(on ? t.foreground : lit ? t.muted : t.dim).hover(s => s.text_color(t.foreground))
+      .on_click((_e, cx) => this.showPanelView(view, cx)).child(label);
+    const files = v_flex().flex_1().min_h(0)
+      .when(Boolean(context), el => el.child(toolbar))
+      .when(rows.length > 0, el => el.child(this.list(rows, t, focused)))
+      .when(Boolean(this.edit?.error), el => el.child(div().px(12).py(6).flex_none().text_size(12).text_color(t.ansi1).border_t(1).border_color(t.border).child(this.edit.error)))
+      .when(Boolean(this.error) || !rows.length, el => el.child(div().id("explorer-empty").flex_1().p(12).text_size(12).text_color(t.dim)
+        .on_mouse_down("right", (_e, cx) => this.contextMenu("", cx)).child(empty)))
+      .when(Boolean(limit), el => el.child(div().px(12).py(6).flex_none().text_size(11).text_color(t.dim).child(limit)));
+    return v_flex().id("explorer-tree-column").size_full().min_h(0).min_w(0)
       .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx))
-      .when(this.tabs.length > 0, el => el.w(TREE_WIDTH).border_l(1).border_color(t.border)).when(!this.tabs.length, el => el.flex_1().min_w(0))
+      .when(this.hasTabs(), el => el.border_l(1).border_color(t.border))
       .child(h_flex().h(36).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
         .when(Boolean(context && this.icon(name, true, true, 16, t)), el => el.child(this.icon(name, true, true, 16, t)))
         .child(div().flex_1().min_w(0).truncate().font_semibold().child(name || "Files"))
         .child(div().id("explorer-settings").w(24).h(24).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
           .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => this.openSettings()).child(svg(`${MOD}/ui/settings.svg`).size(14))))
-      .when(Boolean(context), el => el.child(toolbar))
-      .when(rows.length > 0, el => el.child(this.list(rows, t, focused)))
-      .when(Boolean(this.edit?.error), el => el.child(div().px(12).py(6).flex_none().text_size(12).text_color(t.ansi1).border_t(1).border_color(t.border).child(this.edit.error)))
-      .when(Boolean(this.error) || !rows.length, el => el.child(div().id("explorer-empty").p(12).text_size(12).text_color(t.dim)
-        .on_mouse_down("right", (_e, cx) => this.contextMenu("", cx)).child(empty)))
-      .when(Boolean(limit), el => el.child(div().px(12).py(6).flex_none().text_size(11).text_color(t.dim).child(limit)));
+      .child(searching ? this.finder.render(t, editorFont()) : files)
+      .when(Boolean(context), el => el.child(h_flex().h(30).flex_none().items_start().bg(t.chrome)
+        .child(bottomTab("explorer-view-files", "Explorer", !searching, true, "files", true))
+        .child(bottomTab("explorer-view-search", "Search", searching, Boolean(this.folderSearch?.ran), "search", false))
+        .child(line(div().flex_1()))));
   }
 
   editor(t, cx) {
@@ -1365,7 +1436,11 @@ export default class Explorer extends View {
     this.panelShown = shown;
     const t = theme();
     return h_flex().id("explorer").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
-      .when(this.tabs.length > 0, el => el.child(this.editor(t, cx)))
-      .child(this.tree(t));
+      // With files open, the line between the editor and the panel drags; Herdr keeps where it's left.
+      .child(this.hasTabs()
+        ? h_resizable("explorer-split").size_full()
+          .child(resizable_panel().child(this.editor(t, cx)))
+          .child(resizable_panel().size(TREE_WIDTH).size_range(200, 1200).child(this.tree(t)))
+        : this.tree(t));
   }
 }
