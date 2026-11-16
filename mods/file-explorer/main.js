@@ -71,7 +71,7 @@ function syntaxColors(t) {
   if (syntaxMode() === "vscode") return VSCODE_SYNTAX[settings().dark === false ? "light" : "dark"];
   return { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 };
 }
-const TREE_WIDTH = 280, NARROW = 368, EDITOR_WIDTH = 640, MIN_EDITOR = 320, ROW = 24, PAGE = 10;
+const TREE_WIDTH = 280, NARROW = 368, EDITOR_WIDTH = 640, MIN_EDITOR = 320, TREE_LINE = 1, ROW = 24, PAGE = 10;
 // The key of the row where a new file or folder is named; real paths never hold "//".
 const NEW_ROW = "//new";
 const CONFLICTS = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]), RANK = { U: 1, A: 2, D: 3, M: 4, C: 5 };
@@ -1003,7 +1003,8 @@ export default class Explorer extends View {
     if (wide === this.wide || !node) return;
     const first = this.wide == null;
     this.wide = wide;
-    // The panel's border takes 1px each side: the tree is measured itself, so it doesn't shift by 2px.
+    // The panel's border takes 1px each side, and with files open the tree's own left line 1px more:
+    // the tree is measured itself and given that 1px, so its content doesn't move.
     const border = 2;
     if (wide) {
       this.treeWidth = this.treeColumnWidth ?? (this.panelWidth ?? NARROW) - border;
@@ -1013,9 +1014,9 @@ export default class Explorer extends View {
       if (node.max && this.treeWidth + MIN_EDITOR + border > node.max) this.treeWidth = Math.max(200, node.max - MIN_EDITOR - border);
       // A fresh group, so Herdr's memory of an earlier split doesn't override the tree's width.
       this.splitId = (this.splitId ?? 0) + 1;
-      run("layout.resize", { id: node.id, px: this.treeWidth + (this.editorWidth ?? EDITOR_WIDTH) + border });
+      run("layout.resize", { id: node.id, px: this.treeWidth + TREE_LINE + (this.editorWidth ?? EDITOR_WIDTH) + border });
     } else {
-      if (this.panelWidth && this.treeWidth) this.editorWidth = Math.max(200, this.panelWidth - this.treeWidth - border);
+      if (this.panelWidth && this.treeWidth) this.editorWidth = Math.max(200, this.panelWidth - this.treeWidth - TREE_LINE - border);
       // On start the panel is as the layout left it.
       if (!first) run("layout.resize", { id: node.id, px: (this.aloneWidth ?? this.treeWidth ?? NARROW) + border });
     }
@@ -1691,9 +1692,9 @@ export default class Explorer extends View {
       .child(this.hasTabs()
         // The tree's width as last dragged: the explorer keeps it too, in case the group starts over.
         ? h_resizable(`explorer-split-${this.splitId ?? 0}`).size_full()
-          .on_resize(sizes => { if (sizes[1]) this.treeWidth = this.aloneWidth = Math.round(sizes[1]); })
+          .on_resize(sizes => { if (sizes[1]) this.treeWidth = this.aloneWidth = Math.round(sizes[1]) - TREE_LINE; })
           .child(resizable_panel().child(this.editor(t, cx)))
-          .child(resizable_panel().size(this.treeWidth ?? TREE_WIDTH).size_range(200, 1200).child(this.tree(t)))
+          .child(resizable_panel().size((this.treeWidth ?? TREE_WIDTH) + TREE_LINE).size_range(200, 1200).child(this.tree(t)))
         : this.tree(t));
   }
 }
