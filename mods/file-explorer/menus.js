@@ -14,9 +14,10 @@ export function request(action, p, extra = {}) {
 
 const close = () => closeOverlay(props().overlay);
 
-function item(t, id, label, hint, onClick) {
-  return h_flex().id(`item-${id}`).h(28).flex_none().px(10).gap(8).items_center().rounded(6).cursor_pointer()
-    .hover(s => s.bg(t.hover)).on_click(onClick)
+// `disabled`: shown dimmed, as VS Code does for an item that doesn't apply here.
+function item(t, id, label, hint, onClick, disabled = false) {
+  return h_flex().id(`item-${id}`).h(28).flex_none().px(10).gap(8).items_center().rounded(6)
+    .when(disabled, el => el.text_color(t.dim)).when(!disabled, el => el.cursor_pointer().hover(s => s.bg(t.hover)).on_click(onClick))
     .child(div().flex_1().min_w(0).truncate().child(label))
     .when(Boolean(hint), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(hint)));
 }
@@ -225,4 +226,34 @@ export function renderMove(p, t, handle) {
     .child(h_flex().flex_1().items_end().justify_end().gap(8)
       .child(button("move-no", "Cancel", false, () => close()))
       .child(button("move-yes", "Move", true, () => yes())));
+}
+
+// --- Right-click on an editor tab ---------------------------------------------------------------
+
+export function tabItems(p) {
+  return [
+    { id: "tab-close", label: "Close" },
+    { id: "tab-close-others", label: "Close Others", disabled: !p.others },
+    { id: "tab-close-right", label: "Close to the Right", disabled: !p.right },
+    { id: "tab-close-saved", label: "Close Saved", disabled: !p.saved },
+    { id: "tab-close-all", label: "Close All" },
+    "-",
+    { id: "copy-path", label: "Copy Path" },
+    { id: "copy-relative", label: "Copy Relative Path" },
+  ];
+}
+
+export function openTabMenu(p) {
+  openOverlay({ mod: NAME, kind: "popup", width: 240, height: contextHeight(tabItems(p)), props: { ...p, menu: "tab" } });
+}
+
+export function renderTabContext(p, t) {
+  const act = (id, cx) => {
+    if (id === "copy-path") cx.write_to_clipboard(p.full);
+    else if (id === "copy-relative") cx.write_to_clipboard(p.relative);
+    else request(id, p);
+    close();
+  };
+  return v_flex().id("explorer-tab-context").size_full().p(6).text_size(13).text_color(t.foreground)
+    .children(tabItems(p).map(it => it === "-" ? separator(t) : item(t, it.id, it.label, it.hint, (_e, cx) => act(it.id, cx), it.disabled)));
 }

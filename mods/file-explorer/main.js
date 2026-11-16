@@ -4,7 +4,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState, h_resizable, resizable_panel } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify, checking } from "herdr";
 import * as fs from "fs/promises";
-import { NAME, REQUEST, renderSettings, renderContext, renderDelete, renderUnsaved, renderEditorContext, contextItems, contextHeight, openDeleteDialog, openUnsavedDialog, openEditorMenu, editorMenuClosed, openMoveDialog, renderMove } from "./menus.js";
+import { NAME, REQUEST, renderSettings, renderContext, renderDelete, renderUnsaved, renderEditorContext, contextItems, contextHeight, openDeleteDialog, openUnsavedDialog, openEditorMenu, editorMenuClosed, openMoveDialog, renderMove, openTabMenu, renderTabContext } from "./menus.js";
 import * as ops from "./ops.js";
 import { QuickOpen, remember } from "./quickopen.js";
 import { shownIn, sizedNode } from "./place.js";
@@ -238,9 +238,9 @@ export default class Explorer extends View {
       this.quick = new QuickOpen(this, cx);
       return;
     }
-    if (p?.menu === "context" || p?.menu === "editor" || p?.menu === "delete" || p?.menu === "unsaved" || p?.menu === "move") {
+    if (p?.menu === "context" || p?.menu === "editor" || p?.menu === "tab" || p?.menu === "delete" || p?.menu === "unsaved" || p?.menu === "move") {
       this.menu = { kind: p.menu };
-      if (p.menu !== "context" && p.menu !== "editor") { this.menu.handle = cx.focus_handle(); this.menu.handle.focus(); }
+      if (p.menu !== "context" && p.menu !== "editor" && p.menu !== "tab") { this.menu.handle = cx.focus_handle(); this.menu.handle.focus(); }
       return;
     }
     // Requests are kept in shared state across restarts: only act on ones made from now on.
@@ -977,6 +977,35 @@ export default class Explorer extends View {
 
   hasTabs() { return this.tabs.length > 0; }
 
+  // Right-click on a tab: VS Code's tab menu.
+  tabMenu(rel, cx) {
+    if (!this.context) return;
+    const i = this.tabs.findIndex(t => t.rel === rel);
+    if (i === -1) return;
+    openTabMenu({ ...this.target(rel, false), others: this.tabs.length > 1, right: i < this.tabs.length - 1,
+      saved: this.tabs.some(t => !this.unsaved(t.rel)) });
+  }
+
+  unsaved(rel) { return Boolean(this.views.get(rel)?.dirty || this.drafts.has(rel)); }
+
+  // Close asks about unsaved edits, as × does. The others close what's saved and leave tabs with
+  // unsaved edits open (a toast says how many), rather than asking once per file.
+  tabAction(action, rel, cx) {
+    const i = this.tabs.findIndex(t => t.rel === rel);
+    if (i === -1) return;
+    if (action === "tab-close") { this.closeTab(rel, cx); return; }
+    const pick = action === "tab-close-others" ? this.tabs.filter(t => t.rel !== rel)
+      : action === "tab-close-right" ? this.tabs.slice(i + 1)
+      : this.tabs.slice();
+    const kept = pick.filter(t => this.unsaved(t.rel));
+    for (const tab of pick) if (!this.unsaved(tab.rel)) this.closeTab(tab.rel, cx, true);
+    if (kept.length && action !== "tab-close-saved") {
+      notify({ title: `${kept.length} tab${kept.length > 1 ? "s" : ""} with unsaved changes left open`,
+        body: "Save them, or close them one by one to choose." });
+    }
+    cx.notify();
+  }
+
   // Ctrl+Shift+F, or Find in Folder… (`scope`: a folder, "" for all; null keeps the last one).
   openSearch(scope, cx) {
     if (!this.context) return;
@@ -1211,6 +1240,7 @@ export default class Explorer extends View {
     if (this.menu.kind === "unsaved") return renderUnsaved(props(), t, this.menu.handle);
     if (this.menu.kind === "editor") return renderEditorContext(props(), t);
     if (this.menu.kind === "move") return renderMove(props(), t, this.menu.handle);
+    if (this.menu.kind === "tab") return renderTabContext(props(), t);
     return renderSettings(this.menu, t, {
       onTheme: name => setShared(THEME_KEY, name),
       syntax: syntaxMode(), onSyntax: mode => setShared(SYNTAX_KEY, mode),
@@ -1284,7 +1314,7 @@ export default class Explorer extends View {
     this.lastRequest = r.id;
     if (!this.context || r.root !== this.context.root) return;
     // Another machine's space only reads: no file changes there.
-    if (this.context.on && !["open", "reveal", "find-in-folder", "editor-copy", "editor-reference", "editor-find", "editor-goto", "editor-refocus"].includes(r.action)) return;
+    if (this.context.on && !r.action.startsWith("tab-") && !["open", "reveal", "find-in-folder", "editor-copy", "editor-reference", "editor-find", "editor-goto", "editor-refocus"].includes(r.action)) return;
     // Rendering is no place to change state: act right after. A timer rather than cx.spawn: the
     // edit schedules its own timer, which a finished task's context drops.
     cx.timer.after(0, cx => {
@@ -1302,6 +1332,7 @@ export default class Explorer extends View {
         else if (this.goto.open) this.goto.input.focus();
         else this.activeCode()?.focus();
       }
+      else if (r.action.startsWith("tab-")) this.tabAction(r.action, r.rel, cx);
       else if (r.action === "cut") this.cutEntry(r.rel, cx);
       else if (r.action === "paste") this.pasteInto(r.folder ?? "", cx);
       else if (r.action === "move-confirmed") this.moveEntry(r.rel, r.folder ?? "", cx);
@@ -1746,6 +1777,7 @@ export default class Explorer extends View {
         .border_r(1).border_color(t.border).bg(on ? t.background : t.chrome).hover(s => s.bg(on ? t.background : t.hover))
         .on_click((e, cx) => { this.active = tab.rel; if (e.click_count >= 2) tab.preview = false; cx.notify(); })
         .on_mouse_down("middle", (_e, cx) => this.closeTab(tab.rel, cx))
+        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.tabMenu(tab.rel, cx); })
         .when(Boolean(this.icon(base(tab.rel), false, false, 14, t)), el => el.child(this.icon(base(tab.rel), false, false, 14, t)))
         .child(div().text_size(12).text_color(color).when(tab.preview, el => el.italic()).child(base(tab.rel)))
         .child(div().id(`close-${tab.rel}`).w(18).h(18).flex().items_center().justify_center().rounded(4).text_size(12)

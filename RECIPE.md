@@ -68,6 +68,10 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Find while editing: after Enter or `F3` the editor has the keyboard and Enter keeps stepping
     (a binding for `FindStepping > Input`, switched on by the editor area's `key_context`); a click
     or an edit in the text ends it. Letters always go to the file.
+- **Right-click a tab:** a 240px popup at the pointer, as VS Code's: Close, Close Others, Close to the
+  Right, Close Saved, Close All (items that don't apply are dimmed), Copy Path, Copy Relative Path. Close
+  asks about unsaved edits as `×` does; the others close only saved tabs and leave the rest open, with a
+  toast saying how many (no dialog per file). No shortcuts are shown: the explorer binds none of VS Code's.
 - **Right-click in a file's text** (not its tabs or bars): a 260px popup at the pointer.
   - Cut, Copy, Paste (Cut and Paste in editable files, Cut and Copy with a selection).
   - Copy Reference (to Lines, with a selection): `@path#5-10` (`#5` for one line, the bare path

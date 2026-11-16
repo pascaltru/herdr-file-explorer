@@ -16,6 +16,8 @@ file icons and git colors, and editor tabs beside it, in the right-hand panel.
   the file changes on disk meanwhile (an agent), the tab keeps your edits and offers Reload or Keep
   mine; a save never overwrites a change it didn't see. Closing a tab with unsaved changes asks: Save,
   Don't Save or Cancel. Files on another machine are read-only.
+- **Right-click a tab:** Close, Close Others, Close to the Right, Close Saved, Close All, Copy Path,
+  Copy Relative Path. Only Close asks about unsaved changes; the others leave those tabs open.
 - **Right-click in a file:** Cut, Copy, Paste; Copy Reference (to the selected lines, `@path#5-10`,
   to paste in an agent's prompt), Copy Path, Copy Relative Path; Find in File, Go to Line; Save.
 - **Go to line:** `ctrl+g` in an open file, then a line number or `line:column` and Enter.
