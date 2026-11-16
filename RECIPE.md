@@ -1,7 +1,7 @@
 # File Explorer
 
 An IDE-style explorer in Herdr's right-hand panel, like VS Code's or Zed's. It shows the active space's
-repository as a tree, with file icons and git colors. Clicking a file opens it in read-only editor
+repository as a tree, with file icons and git colors. Clicking a file opens it in editor
 tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the repository by name.
 
 ![File Explorer](preview.png)
@@ -26,7 +26,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
     file's git color.
   - A 26px breadcrumb row: the folders in `muted`, separated by `›`, then the file's icon and name in
     `foreground`.
-  - The file in Herdr's code editor: read-only, with line numbers and folding. Its font is VS Code's
+  - The file in Herdr's code editor, with line numbers and folding. Its font is VS Code's
     default (Consolas 14 on Windows, Menlo 12 on macOS), with lines spaced at size × 1.35 (× 1.5 on
     macOS). Images are shown centered instead.
 - **Git colors** follow VS Code's letters: U untracked and A added in `ansi2` (green), M modified in
@@ -48,6 +48,22 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Clicking a folder opens or closes it.
   - Clicking a file opens a preview tab; the next preview replaces it. A double-click keeps the tab.
   - Clicking a tab shows it; double-clicking keeps it; a middle click or `×` closes it.
+- **Editing** (local files; another machine's stay read-only, since Herdr writes only local files):
+  - Typing edits the tab. The first edit keeps a preview tab. A tab with unsaved edits shows `●`
+    instead of `×`.
+  - `ctrl+s` saves with `writeTextFile(path, text, expected)`: Herdr writes only if the file still
+    holds `expected`, the text the tab started from, so an agent's change in between is never
+    overwritten. New lines get the file's line endings (a CRLF file stays CRLF). Herdr's editor keeps
+    Ctrl+S, so it is bound like Ctrl+F (`ExplorerEditor > Input`).
+  - The file changes on disk: a tab without unsaved edits reloads; one with edits keeps them and
+    shows a bar, "This file changed on disk since you started editing." with Reload (the file as it
+    is) and Keep mine (writes the tab over it). A refused save shows the same bar. A file whose text
+    is already the tab's (your own save) isn't reloaded, so the cursor stays.
+  - Unsaved edits survive a space switch, a theme, color or font change and a catch-up: the editor
+    is recreated from a draft (its undo history is lost; Herdr's editor can't be given one).
+  - Find while editing: after Enter or `F3` the editor has the keyboard and Enter keeps stepping
+    (a binding for `FindStepping > Input`, switched on by the editor area's `key_context`); a click
+    or an edit in the text ends it. Letters always go to the file.
 - **Go to line:** `ctrl+g` (from the editor or the tree, with a file tab open) shows a bar above the
   file: "Go to line", a box, and the file's range (`1–207`). A line number, or `line:column`, and Enter
   put the cursor there, in the middle of the editor, and give the editor the keyboard. Anything else
@@ -59,9 +75,9 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Typing scrolls to the first match from the cursor (not highlighted yet: Herdr's editor draws a
     selection only while it has the keyboard). Enter or `F3` goes to the next match, Shift with either
     to the previous one: the match is selected in the middle of the editor, which gets the keyboard so
-    it shows. The bar stays in charge: from the editor, Enter keeps stepping, and letters or Backspace
-    edit the query and bring the keyboard back to the box, so it feels as if it never left. Escape
-    closes the bar.
+    it shows. From the editor, Enter keeps stepping until a click or an edit in the text (see
+    Editing). In a read-only file, letters and Backspace edit the query and bring the keyboard back
+    to the box. Escape closes the bar.
   - Plain text, up to 10,000 matches. Only the current match is highlighted: Herdr's editor can't
     mark several. Go to line and find share the place above the file; opening one closes the other.
   - Herdr's editor binds Ctrl+F to a search panel it never shows, and keeps the key. The explorer binds
@@ -224,7 +240,8 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - 500 entries per folder; 200,000 paths from git.
   - Remote spaces can't be watched (polling instead), can't preview images, and offer only the
     read-only actions.
-  - Editing isn't supported: tabs are read-only.
+  - Unsaved edits live in the explorer: quitting Herdr or reloading the mod loses them (mods get no
+    warning). Closing a tab with unsaved edits discards them.
 
 ## Done when
 

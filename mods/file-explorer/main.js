@@ -2,7 +2,7 @@
 // Derived from the Herdr app's `files` mod (Apache-2.0, see LICENSE-Herdr.txt) and modified; see NOTICE.
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState, h_resizable, resizable_panel } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify, checking } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify, checking } from "herdr";
 import * as fs from "fs/promises";
 import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
 import * as ops from "./ops.js";
@@ -266,7 +266,14 @@ export default class Explorer extends View {
     this.goto = new GoToLine(this); this.findBar = new FindBar(this); this.pendingJump = null;
     // Herdr's editor binds Ctrl+F to a search it never shows, and keeps the key. The keymap is the
     // app's: a binding for an input inside this explorer's editor area, made later, wins over it.
-    if (!checking()) cx.bind_keys([{ keystroke: "ctrl-f", action: "explorer-find", context: "ExplorerEditor > Input" }]);
+    // Ctrl+S and, while find is stepping through matches, Enter the same way: an editable editor keeps
+    // those keys too.
+    if (!checking()) cx.bind_keys([
+      { keystroke: "ctrl-f", action: "explorer-find", context: "ExplorerEditor > Input" },
+      { keystroke: "ctrl-s", action: "explorer-save", context: "ExplorerEditor > Input" },
+      { keystroke: "enter", action: "explorer-find-next", context: "FindStepping > Input" },
+      { keystroke: "shift-enter", action: "explorer-find-previous", context: "FindStepping > Input" },
+    ]);
     this.modPath = MOD; this.finder = new FolderSearch(this, cx);
     // Remote spaces can't be watched, and a failed watch falls back to polling.
     // Herdr keeps a hidden panel's mod running: it refreshes once shown again instead (see render).
@@ -298,6 +305,8 @@ export default class Explorer extends View {
     this.search?.set_value(saved?.searchText ?? "");
     // The search tab's query and results (search.js).
     this.folderSearch = saved?.folderSearch ?? null; this.panelView = saved?.panelView ?? "files";
+    // Unsaved edits of tabs whose editor was let go (see release).
+    this.drafts = saved?.drafts ?? new Map();
     this.finder?.input.set_value(this.folderSearch?.text ?? "");
     this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.cut = new Set(); this.gitLimited = false;
     this.version++;
@@ -355,10 +364,10 @@ export default class Explorer extends View {
     // Coming back reloads in full, so the old folder's watch would only hold one of Herdr's 64 slots.
     old?.watch?.cancel();
     if (old) {
-      for (const view of this.views.values()) this.release(view);
+      for (const [rel, view] of this.views) this.release(view, rel);
       this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, deleted: this.deleted, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active,
         query: this.query, searchText: this.search.value(), changesOnly: this.changesOnly, filterClosed: this.filterClosed, filterOpened: this.filterOpened,
-        folderSearch: this.folderSearch, panelView: this.panelView });
+        folderSearch: this.folderSearch, panelView: this.panelView, drafts: this.drafts });
     }
     if (!root) { this.context = null; this.reset(); this.fit(); return; }
     this.reset(this.saved.get(`${on ?? ""}|${root}`));
@@ -781,9 +790,10 @@ export default class Explorer extends View {
   // Keys for the open file, from the tree or the editor area (Ctrl+F from the text comes as an action).
   editorKey(e, cx, fromEditor = false) {
     const m = e.modifiers;
-    // The find bar is open but the editor has the keyboard (after Enter): Enter keeps stepping, and
-    // typing goes to the box.
-    if (fromEditor && this.findBar.open && !this.findBar.boxFocused && this.activeCode()) {
+    // A read-only file with the find bar open (after Enter): Enter keeps stepping, and typing goes to
+    // the box. An editable file keeps its letters and Enter; its stepping Enter is a binding.
+    const view = this.active ? this.views.get(this.active) : null;
+    if (fromEditor && this.findBar.open && !this.findBar.boxFocused && view?.code && !view.editable) {
       if (e.key === "enter" && !m.control && !m.alt) { this.findBar.step(m.shift ? -1 : 1, cx); cx.stop_propagation(); return true; }
       if (this.findBar.typeIntoBox(e, cx)) { cx.stop_propagation(); return true; }
     }
@@ -796,6 +806,12 @@ export default class Explorer extends View {
       return true;
     }
     if (e.key === "f" && m.control && !m.shift && !m.alt && this.showFind(cx)) { cx.stop_propagation(); return true; }
+    if (e.key === "s" && m.control && !m.shift && !m.alt && this.activeCode()) {
+      const rel = this.active;
+      cx.spawn(async cx => { await this.save(rel, cx); });
+      cx.stop_propagation();
+      return true;
+    }
     if (e.key === "escape" && (this.goto.open || this.findBar.open)) {
       if (this.goto.open) this.goto.hide(cx); else this.findBar.hide(cx);
       this.activeCode()?.focus();
@@ -882,6 +898,16 @@ export default class Explorer extends View {
     cx.notify();
   }
 
+  conflictBar(rel, t) {
+    const button = (id, label, click) => div().id(id).h(22).px(8).flex().items_center().rounded(4).cursor_pointer()
+      .border_1().border_color(t.border).hover(s => s.bg(t.hover)).on_click((_e, cx) => click(cx)).child(label);
+    return h_flex().id("explorer-conflict").h(34).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
+      .bg(t.chrome).text_size(12)
+      .child(div().flex_1().min_w(0).truncate().text_color(t.ansi3).child("This file changed on disk since you started editing."))
+      .child(button("conflict-reload", "Reload", cx => this.reloadFile(rel, cx)))
+      .child(button("conflict-keep", "Keep mine", cx => cx.spawn(async cx => { await this.save(rel, cx, true); })));
+  }
+
   // Ctrl+G: the active tab's text must be there to count its lines.
   showGoTo(cx) {
     const code = this.activeCode();
@@ -922,7 +948,7 @@ export default class Explorer extends View {
     const i = this.tabs.findIndex(t => t.rel === rel);
     if (i === -1) return;
     this.tabs.splice(i, 1);
-    this.drop(rel);
+    this.drop(rel, true);
     if (this.active === rel) this.active = this.tabs[Math.min(i, this.tabs.length - 1)]?.rel ?? null;
     this.fit();
     cx.notify();
@@ -972,19 +998,79 @@ export default class Explorer extends View {
 
   // --- File views --------------------------------------------------------------------
 
-  release(view) {
+  // A view with unsaved edits leaves its text behind as a draft, which the next view of the file
+  // starts from: switching space, a new font or colors, or a catch-up recreate views.
+  release(view, rel) {
+    if (rel && view.code && view.dirty) this.drafts.set(rel, { text: view.code.value(), base: view.base, crlf: view.crlf });
     view.code?.release();
     if (view.picture) fs.unlink(`${appHome()}/${view.picture}`).catch(() => {});
   }
 
-  drop(rel) {
+  // `discard`: unsaved edits go too (Reload, or closing the tab).
+  drop(rel, discard = false) {
     const view = this.views.get(rel);
-    if (view) { this.release(view); this.views.delete(rel); }
+    if (view) { this.release(view, discard ? null : rel); this.views.delete(rel); }
+    if (discard) this.drafts.delete(rel);
   }
 
+  // The file changed on disk. A tab without unsaved edits reloads; one with edits keeps them and
+  // shows the "changed on disk" bar; one whose text is already what's on disk (our own save) is
+  // left alone, cursor and all.
   stale(rel, cx) {
-    this.drop(rel);
-    if (this.active === rel) cx.notify();
+    const view = this.views.get(rel);
+    if (!view?.code) { this.drop(rel); if (this.active === rel) cx.notify(); return; }
+    const context = this.context;
+    cx.spawn(async cx => {
+      const disk = await readTextFile(this.join(rel, context), { on: context.on }).catch(() => null);
+      if (this.context !== context || this.views.get(rel) !== view) return;
+      if (disk === view.base) return;
+      if (view.dirty) view.conflict = true;
+      else this.drop(rel);
+      cx.notify();
+    });
+  }
+
+  // Unsaved edits: the text compared with what was read or last saved, line endings as the file has them.
+  edited(rel, view, cx) {
+    const dirty = this.fileText(view) !== view.base;
+    if (dirty === view.dirty) return;
+    view.dirty = dirty;
+    // Editing keeps a preview tab, as in VS Code.
+    if (dirty) { const tab = this.tabs.find(t => t.rel === rel); if (tab) tab.preview = false; }
+    cx.notify();
+  }
+
+  // What saving writes: the editor's text, with new lines in the file's own line endings.
+  fileText(view) {
+    const text = view.code.value();
+    return view.crlf ? text.replace(/\r?\n/g, "\r\n") : text;
+  }
+
+  // Ctrl+S. Herdr writes only if the file still holds what the tab started from (`expected`), so an
+  // agent's change in between isn't overwritten: the "changed on disk" bar shows instead. `force`
+  // (Keep mine) writes over the file as it is now.
+  async save(rel, cx, force = false) {
+    const view = this.views.get(rel), context = this.context;
+    if (!view?.code || !view.editable || (!view.dirty && !force)) return;
+    const path = this.join(rel, context), text = this.fileText(view);
+    try {
+      const expected = force ? await readTextFile(path) : view.base;
+      await writeTextFile(path, text, expected);
+      if (this.views.get(rel) !== view) return;
+      view.base = text; view.conflict = false;
+      this.edited(rel, view, cx);
+    } catch (e) {
+      if (this.views.get(rel) !== view) return;
+      // Most often a stale snapshot: the file changed since it was read.
+      view.conflict = true;
+    }
+    cx.notify();
+  }
+
+  // The "changed on disk" bar's Reload: the file as it is now, unsaved edits dropped.
+  reloadFile(rel, cx) {
+    this.drop(rel, true);
+    cx.notify();
   }
 
   view(rel, cx) {
@@ -1004,14 +1090,28 @@ export default class Explorer extends View {
         }
         const text = await readTextFile(path, { on: context.on });
         if (this.views.get(rel) !== view) return;
-        if (text === null) { view.message = "This file no longer exists"; return; }
-        if (text.includes("\0")) { view.message = "Binary file: no preview"; return; }
+        const draft = this.drafts.get(rel);
+        if (text === null && !draft) { view.message = "This file no longer exists"; return; }
+        if (text?.includes("\0")) { view.message = "Binary file: no preview"; return; }
         const t = theme();
         const language = LANG_BY_NAME[base(rel).toLowerCase()] ?? LANG[ext] ?? (ext || "txt");
         const font = editorFont();
-        view.code = EditorState.new({ language, readonly: true, value: text,
+        // Herdr writes only local files: another machine's files stay read-only.
+        view.editable = !context.on;
+        view.base = draft ? draft.base : text;
+        view.crlf = draft ? draft.crlf : text.includes("\r\n");
+        view.code = EditorState.new({ language, readonly: !view.editable, value: draft ? draft.text : text,
           font_family: font.family, font_size: font.size,
           syntax: syntaxColors(t) });
+        this.drafts.delete(rel);
+        view.dirty = Boolean(draft);
+        // The file changed while the edits waited as a draft.
+        view.conflict = Boolean(draft) && text !== draft.base;
+        view.code.on("change", (_e, cx) => {
+          if (this.views.get(rel) !== view) return;
+          this.findBar.stepping = false;
+          this.edited(rel, view, cx);
+        });
         cx.notify();
         await this.applyJump(rel, cx);
       } catch { if (this.views.get(rel) === view) view.message = "Can't preview this file: it's over 1 MB or unreadable"; }
@@ -1221,6 +1321,7 @@ export default class Explorer extends View {
   moved(from, to) {
     const map = p => (p === from ? to : p.startsWith(from + "/") ? to + p.slice(from.length) : p);
     for (const tab of this.tabs) { const next = map(tab.rel); if (next !== tab.rel) { this.drop(tab.rel); tab.rel = next; } }
+    this.drafts = new Map([...this.drafts].map(([rel, draft]) => [map(rel), draft]));
     if (this.active) this.active = map(this.active);
     this.folders = new Set([...this.folders].map(map));
     this.entries = new Map([...this.entries].map(([key, list]) => [map(key), list]));
@@ -1428,7 +1529,8 @@ export default class Explorer extends View {
         .child(div().text_size(12).text_color(color).when(tab.preview, el => el.italic()).child(base(tab.rel)))
         .child(div().id(`close-${tab.rel}`).w(18).h(18).flex().items_center().justify_center().rounded(4).text_size(12)
           .text_color(on ? t.muted : t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .on_click((_e, cx) => { cx.stop_propagation(); this.closeTab(tab.rel, cx); }).child("×"));
+          .on_click((_e, cx) => { cx.stop_propagation(); this.closeTab(tab.rel, cx); })
+          .child(this.views.get(tab.rel)?.dirty || this.drafts.has(tab.rel) ? "●" : "×"));
     });
     const active = this.active, view = active ? this.view(active, cx) : null;
     const parts = active ? active.split("/") : [];
@@ -1445,7 +1547,13 @@ export default class Explorer extends View {
       : view.picture ? div().flex_1().min_h(0).p(16).flex().items_center().justify_center().child(image(view.picture).max_w_full().max_h_full())
       : div().p(16).text_color(t.dim).child(view.message ?? "Loading…");
     return v_flex().id("explorer-editor").flex_1().min_w(0).h_full().min_h(0)
-      .key_context("ExplorerEditor").on_action("explorer-find", (_e, cx) => this.showFind(cx))
+      .key_context(this.findBar.open && this.findBar.stepping ? "ExplorerEditor FindStepping" : "ExplorerEditor")
+      .on_action("explorer-find", (_e, cx) => this.showFind(cx))
+      .on_action("explorer-save", (_e, cx) => { const rel = this.active; if (rel) cx.spawn(async cx => { await this.save(rel, cx); }); })
+      .on_action("explorer-find-next", (_e, cx) => this.findBar.step(1, cx))
+      .on_action("explorer-find-previous", (_e, cx) => this.findBar.step(-1, cx))
+      // A click in the text ends find's stepping: Enter is a new line again.
+      .on_mouse_down("left", () => { this.findBar.stepping = false; })
       .on_key_down((e, cx) => this.editorKey(e, cx, true))
       .on_size_change(size => { this.editorHeight = size.height / this.zoom(); })
       .child(h_flex().id("explorer-tabs").h(34).flex_none().bg(t.chrome).border_b(1).border_color(t.border).overflow_x_scrollbar().children(tabs))
@@ -1455,6 +1563,7 @@ export default class Explorer extends View {
           .tooltip("Find in file (Ctrl+F)").on_click((_e, cx) => this.showFind(cx)).child(svg(`${MOD}/ui/search.svg`).size(13)))))
       .when(this.goto.open && Boolean(view?.code), el => el.child(this.goto.render(t)))
       .when(this.findBar.open && Boolean(view?.code), el => el.child(this.findBar.render(t)))
+      .when(Boolean(view?.conflict), el => el.child(this.conflictBar(active, t)))
       .child(body);
   }
 

@@ -1,6 +1,6 @@
 # Herdr File Explorer
 
-A mod for the Herdr desktop app: an IDE-style tree and read-only editor tabs in the right-hand
+A mod for the Herdr desktop app: an IDE-style tree and editor tabs in the right-hand
 panel, plus Quick Open. `README.md` covers use and install; `RECIPE.md` is the full description
 (what you see, how it behaves, what it's built from, pitfalls, acceptance checks). Keep both true when
 behavior changes.
@@ -88,6 +88,9 @@ behavior changes.
   - With the editor focused, Ctrl+F never reaches `on_key_down` or `keys.json`: the editor binds it.
     `cx.bind_keys` with a context (`ExplorerEditor > Input`) out-binds it, because a later binding
     wins. Ctrl+G, F3, Ctrl+Shift+F and Escape do reach `on_key_down` on its parent.
+  - Editable, it also keeps Enter, letters and Ctrl+S. A binding can be switched on and off by
+    changing the parent's `key_context` ("ExplorerEditor FindStepping"). It keeps CRLF as read;
+    `set_selected_range` fires no change event.
 - **Syntax:** Herdr's editor bundles few grammars. `LANG`/`LANG_BY_NAME` map other types to a close
   relative (TS→js, ps1/Dockerfile→sh, tf→ruby, kt→java, swift→rust, csproj→xml).
 

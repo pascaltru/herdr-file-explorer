@@ -1,7 +1,7 @@
 # Herdr File Explorer
 
 An IDE-style file explorer for [Herdr](https://herdr.dev): the space's repository as a tree with
-file icons and git colors, and read-only editor tabs beside it, in the right-hand panel.
+file icons and git colors, and editor tabs beside it, in the right-hand panel.
 
 ## Use
 
@@ -12,10 +12,13 @@ file icons and git colors, and read-only editor tabs beside it, in the right-han
   Visual Studio. Pending changes shows only changed files (it combines with the search). Collapse closes
   every folder. In the filter box, Escape clears it and Down or Enter moves into the results. Each
   folder keeps its own filter.
+- **Editing:** type in an open file; a dot on its tab marks unsaved changes, and `ctrl+s` saves. If
+  the file changes on disk meanwhile (an agent), the tab keeps your edits and offers Reload or Keep
+  mine; a save never overwrites a change it didn't see. Files on another machine are read-only.
 - **Go to line:** `ctrl+g` in an open file, then a line number or `line:column` and Enter.
 - **Find in file:** `ctrl+f`, `F3`, or the magnifier above the file. Enter or `F3` goes to the next
-  match (Shift: the previous one), and typing keeps editing the query; Escape closes. Only the current
-  match is highlighted.
+  match (Shift: the previous one), and Enter keeps stepping until you click or type in the file;
+  Escape closes. Only the current match is highlighted.
 - **Search in folder:** `ctrl+shift+f` (from the explorer), or right-click a folder → Find in Folder…, or
   the Search tab at the bottom of the panel (next to Explorer). Enter searches (git grep: tracked and
   untracked files, not ignored ones). Results are grouped by file; a click opens the file at the match.

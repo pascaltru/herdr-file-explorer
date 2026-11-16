@@ -79,9 +79,13 @@ export class FindBar {
   constructor(explorer) {
     this.explorer = explorer;
     this.open = false; this.caseSensitive = false; this.matches = []; this.index = -1; this.source = null;
+    // After Enter or F3 the editor has the keyboard, and Enter keeps stepping (a binding the explorer
+    // switches on with this) until a click or an edit in the file.
+    this.stepping = false;
     this.input = InputState.new({ placeholder: "Find in file" });
     this.input.on("change", (_e, cx) => this.typed(cx));
-    // Enter hands the editor the keyboard, so the match is drawn; typeIntoBox brings typing back here.
+    // Enter hands the editor the keyboard, so the match is drawn (in a read-only file, typeIntoBox
+    // brings typing back here).
     this.input.on("submit", (e, cx) => this.step(e?.shift ? -1 : 1, cx));
     this.input.on("focus", () => { this.boxFocused = true; });
     this.input.on("blur", () => { this.boxFocused = false; });
@@ -93,7 +97,7 @@ export class FindBar {
     if (!code) return false;
     const range = code.selected_range(), picked = range.end > range.start ? code.value().slice(range.start, range.end) : "";
     if (picked && !picked.includes("\n") && picked.length <= 200) this.input.set_value(picked);
-    this.open = true;
+    this.open = true; this.stepping = false;
     this.find();
     this.index = this.firstFrom(range.start);
     this.focusInput();
@@ -104,7 +108,7 @@ export class FindBar {
   }
 
   hide(cx) {
-    this.open = false;
+    this.open = false; this.stepping = false;
     cx.notify();
   }
 
@@ -165,6 +169,7 @@ export class FindBar {
       if (i === -1) i = n - 1;
     }
     this.index = i;
+    this.stepping = focus;
     this.explorer.showRange(code, this.matches[i], this.matches[i] + len, focus, cx);
   }
 
