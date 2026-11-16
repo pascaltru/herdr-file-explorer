@@ -71,7 +71,7 @@ function syntaxColors(t) {
   if (syntaxMode() === "vscode") return VSCODE_SYNTAX[settings().dark === false ? "light" : "dark"];
   return { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 };
 }
-const TREE_WIDTH = 280, NARROW = 368, ROW = 24, PAGE = 10;
+const TREE_WIDTH = 280, NARROW = 368, EDITOR_WIDTH = 640, MIN_EDITOR = 320, ROW = 24, PAGE = 10;
 // The key of the row where a new file or folder is named; real paths never hold "//".
 const NEW_ROW = "//new";
 const CONFLICTS = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]), RANK = { U: 1, A: 2, D: 3, M: 4, C: 5 };
@@ -271,6 +271,7 @@ export default class Explorer extends View {
     if (!checking()) cx.bind_keys([
       { keystroke: "ctrl-f", action: "explorer-find", context: "ExplorerEditor > Input" },
       { keystroke: "ctrl-s", action: "explorer-save", context: "ExplorerEditor > Input" },
+      { keystroke: "f2", action: "explorer-rename", context: "ExplorerTree" },
       { keystroke: "enter", action: "explorer-find-next", context: "FindStepping > Input" },
       { keystroke: "shift-enter", action: "explorer-find-previous", context: "FindStepping > Input" },
     ]);
@@ -994,11 +995,30 @@ export default class Explorer extends View {
   }
 
   // The panel is as wide as an editor while files are open, and as narrow as a tree otherwise.
+  // The tree keeps its width, as in VS Code: opening a file adds the editor beside it (the panel grows
+  // by the editor's width), and closing the last one takes the editor's width away again. Both
+  // widths are the person's: whatever the tree was dragged to, and the editor's last width.
   fit() {
     const wide = this.hasTabs(), node = sizedNode();
     if (wide === this.wide || !node) return;
+    const first = this.wide == null;
     this.wide = wide;
-    run("layout.resize", wide ? { id: node.id, weight: 1.2 } : { id: node.id, px: NARROW });
+    // The panel's border takes 1px each side: the tree is measured itself, so it doesn't shift by 2px.
+    const border = 2;
+    if (wide) {
+      this.treeWidth = this.treeColumnWidth ?? (this.panelWidth ?? NARROW) - border;
+      // The width it gets back when the last tab closes, unless the line is dragged meanwhile.
+      this.aloneWidth = this.treeWidth;
+      // The layout caps the panel (`max`): a tree too wide for it gives up just enough for a usable editor.
+      if (node.max && this.treeWidth + MIN_EDITOR + border > node.max) this.treeWidth = Math.max(200, node.max - MIN_EDITOR - border);
+      // A fresh group, so Herdr's memory of an earlier split doesn't override the tree's width.
+      this.splitId = (this.splitId ?? 0) + 1;
+      run("layout.resize", { id: node.id, px: this.treeWidth + (this.editorWidth ?? EDITOR_WIDTH) + border });
+    } else {
+      if (this.panelWidth && this.treeWidth) this.editorWidth = Math.max(200, this.panelWidth - this.treeWidth - border);
+      // On start the panel is as the layout left it.
+      if (!first) run("layout.resize", { id: node.id, px: (this.aloneWidth ?? this.treeWidth ?? NARROW) + border });
+    }
   }
 
   // --- File views --------------------------------------------------------------------
@@ -1524,7 +1544,13 @@ export default class Explorer extends View {
         .on_mouse_down("right", (_e, cx) => this.contextMenu("", cx)).child(empty)))
       .when(Boolean(limit), el => el.child(div().px(12).py(6).flex_none().text_size(11).text_color(t.dim).child(limit)));
     return v_flex().id("explorer-tree-column").size_full().min_h(0).min_w(0)
+      .on_size_change(size => { this.treeColumnWidth = Math.round(size.width / this.zoom()); })
       .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx))
+      // F2 is Herdr's tab rename everywhere else (keys.json); in the tree it renames the selection.
+      .key_context("ExplorerTree")
+      .on_action("explorer-rename", (_e, cx) => {
+        if (this.panelView === "files" && this.selected && !this.edit && !this.searchFocused) this.startRename(this.selected, cx);
+      })
       .when(this.hasTabs(), el => el.border_l(1).border_color(t.border))
       .child(h_flex().h(36).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border)
         .when(Boolean(context && this.icon(name, true, true, 16, t)), el => el.child(this.icon(name, true, true, 16, t)))
@@ -1611,12 +1637,15 @@ export default class Explorer extends View {
     if (shown && this.panelShown === false && Date.now() - (this.spaceChangedAt ?? 0) > 1500) this.h.focus();
     this.panelShown = shown;
     const t = theme();
-    return h_flex().id("explorer").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
+    return h_flex().id("explorer").size_full().min_h(0).rounded(10)
+      .on_size_change(size => { this.panelWidth = Math.round(size.width / this.zoom()); }).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
       // With files open, the line between the editor and the panel drags; Herdr keeps where it's left.
       .child(this.hasTabs()
-        ? h_resizable("explorer-split").size_full()
+        // The tree's width as last dragged: the explorer keeps it too, in case the group starts over.
+        ? h_resizable(`explorer-split-${this.splitId ?? 0}`).size_full()
+          .on_resize(sizes => { if (sizes[1]) this.treeWidth = this.aloneWidth = Math.round(sizes[1]); })
           .child(resizable_panel().child(this.editor(t, cx)))
-          .child(resizable_panel().size(TREE_WIDTH).size_range(200, 1200).child(this.tree(t)))
+          .child(resizable_panel().size(this.treeWidth ?? TREE_WIDTH).size_range(200, 1200).child(this.tree(t)))
         : this.tree(t));
   }
 }

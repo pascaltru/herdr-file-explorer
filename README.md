@@ -24,7 +24,8 @@ file icons and git colors, and editor tabs beside it, in the right-hand panel.
   the Search tab at the bottom of the panel (next to Explorer). Enter searches (git grep: tracked and
   untracked files, not ignored ones). Results are grouped by file; a click opens the file at the match.
   Repositories only.
-- **Width:** with files open, drag the line between the editor and the tree.
+- **Width:** the tree keeps the width you give it (at the panel's edge, or on the line between the
+  editor and the tree); opening a file adds the editor beside it.
 - **Git:** VS Code's letters and colors (U, A, M, D, C); folders holding changes get a dot; ignored files are dimmed.
 - **Right-click** a file, a folder or empty space: Open, New File…, New Folder…, Copy Path,
   Copy Relative Path, Rename… (F2), Delete (Del, to the Recycle Bin or Trash after a confirmation),

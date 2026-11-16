@@ -120,8 +120,8 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   its toolbar) and Search. The shown one hangs from the panel on `background`: open at the top (the
   strip's top line is drawn in pieces around it), straight `border` sides the strip's full height.
   Search is `dim` until a search has run, and still opens the view.
-- **Width:** with files open, the editor and the panel are an `h_resizable` pair: the line between them
-  drags (200px to 1,200px). The panel starts at 280px; Herdr keeps a dragged width for the window.
+- **Width:** with files open, the editor and the tree are an `h_resizable` pair: the line between them
+  drags (200px to 1,200px), and the tree keeps that width as tabs open.
 - **Dragging** a file or folder onto a terminal types its quoted path there, without Enter
   (Herdr's `drag_paths`). Dropping anywhere else does nothing. A row being renamed and a file deleted
   on disk can't be dragged.
@@ -130,7 +130,8 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Right opens a folder, or moves into it if it's open. Left closes a folder, or moves to its parent.
   - Enter opens a file and keeps it, or toggles a folder. Space previews a file.
   - Typing letters jumps to the next name that starts with them.
-  - F2 renames. Delete asks to confirm, then deletes.
+  - F2 renames (Herdr binds F2 to tab rename globally; a `cx.bind_keys` binding for the tree's
+    `ExplorerTree` key context wins there). Delete asks to confirm, then deletes.
   - Escape gives the keyboard back to the terminal.
 - **Right-click** on a file, a folder or empty space:
   - Open
@@ -147,8 +148,11 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Delete moves the entry to the Recycle Bin or Trash, after a confirmation dialog (Enter confirms,
     Escape cancels).
   - The tree changes at once, then checks against the disk.
-- **Panel width:** the panel widens to an editor's width (layout weight 1.2) while files are open, and
-  goes back to 368px when the last tab closes.
+- **Panel width:** the tree keeps its width, as in VS Code. The first file adds the editor beside it:
+  the panel grows by the editor's width (640px at first, then its last width), up to the layout's
+  maximum. Closing the last tab shrinks the panel back to the tree's width. A width dragged at the
+  panel's edge, with or without files, is what the tree keeps. Each wide period gets a fresh
+  `h_resizable` id, so Herdr's memory of an earlier split doesn't override the tree's width.
 - **Live updates:**
   - When anything changes in the repository, git colors and the tree refresh within half a second.
     An open file whose contents change on disk is read again.
