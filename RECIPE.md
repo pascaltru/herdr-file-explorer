@@ -54,15 +54,15 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   turns the box's border red. Escape closes the bar. Herdr's editor scrolls only as far as a selection
   needs, so the jump selects half a screen below, then above, frame by frame, before the target.
 - **Toolbar** (under the header, as in Visual Studio's Solution Explorer):
-  - Search in explorer: keeps the files and folders whose name contains the text (case-insensitive, not
-    fuzzy), with the folders leading to them, open. A folder matching only by its own name shows
-    closed; opened, it shows everything it holds. Files inside an untracked or ignored folder that was
-    never opened aren't found: git doesn't list them.
+  - Filter in explorer (funnel icon): keeps the files and folders whose name contains the text
+    (case-insensitive, not fuzzy), with the folders leading to them, open. A folder matching only by
+    its own name shows closed; opened, it shows everything it holds. Files inside an untracked or
+    ignored folder that was never opened aren't found: git doesn't list them.
   - Pending changes (toggle, highlighted while on): only entries with a git letter or dot. It combines
-    with the search.
+    with the filter.
   - Collapse: closes every folder, or every folder shown under a filter.
   - Under a filter, folders can still be closed and opened; the folders open without a filter come
-    back when it's cleared. Escape in the box clears the search; Down or Enter moves to the first
+    back when it's cleared. Escape in the box clears the filter; Down or Enter moves to the first
     match. Quick Open clears the filter when it would hide the chosen file.
   - The filter, like open folders and tabs, belongs to the space's folder: switching space and back
     restores it.
@@ -222,7 +222,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
 - Editing a file from a terminal turns it yellow within a second. An open tab of it shows the new text.
   Committing clears the color.
 - Writing files inside `node_modules` or `obj` runs no git.
-- Typing `chevron` in the search box shows `mods/file-explorer/ui/` open on the two chevron icons;
+- Typing `chevron` in the filter box shows `mods/file-explorer/ui/` open on the two chevron icons;
   typing `file-explorer` shows that folder closed under `mods`, and opening it shows all its files;
   Pending changes on its own lists exactly the files `git status` shows; Collapse leaves only the top
   level.

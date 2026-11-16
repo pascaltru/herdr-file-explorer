@@ -254,7 +254,7 @@ export default class Explorer extends View {
     this.reset();
     // The toolbar's filters (kept per space, see reset): a name search and changed files only.
     this.searchFocused = false;
-    this.search = InputState.new({ placeholder: "Search in explorer" });
+    this.search = InputState.new({ placeholder: "Filter in explorer" });
     this.search.on("change", (_e, cx) => {
       const query = this.search.value().trim().toLowerCase();
       if (query !== this.query) { this.query = query; this.refilter(cx); }
@@ -1332,7 +1332,7 @@ export default class Explorer extends View {
     const toolbar = h_flex().h(38).flex_none().px(8).gap(4).items_center().border_b(1).border_color(t.border)
       .child(h_flex().id("explorer-search").flex_1().min_w(0).h(26).px(6).gap(6).items_center().rounded(5).border_1()
         .border_color(this.searchFocused ? t.accent : t.border).bg(t.background)
-        .child(svg(`${MOD}/ui/search.svg`).size(13).flex_none().text_color(t.dim))
+        .child(svg(`${MOD}/ui/funnel.svg`).size(13).flex_none().text_color(t.dim))
         .child(Input.new(this.search).flex_1().min_w(0).h_full().text_color(t.foreground))
         .when(Boolean(this.query), el => el.child(div().id("explorer-search-clear").w(18).h(18).flex_none().flex().items_center().justify_center().rounded(3)
           .cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
