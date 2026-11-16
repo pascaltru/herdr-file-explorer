@@ -30,8 +30,10 @@ file icons and git colors, and editor tabs beside it, in the right-hand panel.
   editor and the tree); opening a file adds the editor beside it.
 - **Git:** VS Code's letters and colors (U, A, M, D, C); folders holding changes get a dot; ignored files are dimmed.
 - **Right-click** a file, a folder or empty space: Open, New File…, New Folder…, Copy Path,
-  Copy Relative Path, Rename… (F2), Delete (Del, to the Recycle Bin or Trash after a confirmation),
-  Reveal in File Explorer, Open in Terminal. Names are edited in place, as in VS Code.
+  Copy Relative Path, Cut and Paste (Ctrl+X / Ctrl+V: moves it; outside a git repository it asks
+  first), Rename… (F2), Delete (Del, to the Recycle Bin or Trash after a confirmation),
+  Reveal in File Explorer, Open in Terminal. Names are edited in place, as in VS Code. Ctrl+Z in
+  the tree undoes the last move or rename.
   Spaces on another machine only offer the read-only actions.
 - **Quick Open** (`ctrl-e`): find a file of the repository by name with fuzzy matching; before typing,
   the recently opened files. Enter opens it in the panel and reveals it in the tree.

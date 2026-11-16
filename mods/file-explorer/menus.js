@@ -67,7 +67,10 @@ export function contextItems(p) {
   if (local) items.push({ id: "new-file", label: "New File…" }, { id: "new-folder", label: "New Folder…" });
   items.push("-", { id: "copy-path", label: "Copy Path" });
   if (p.rel) items.push({ id: "copy-relative", label: "Copy Relative Path" });
-  if (local && p.rel) items.push("-", { id: "rename", label: "Rename…", hint: "F2" }, { id: "delete", label: "Delete", hint: "Del" });
+  if (local && (p.rel || p.canPaste)) items.push("-");
+  if (local && p.rel) items.push({ id: "cut", label: "Cut", hint: "Ctrl+X" });
+  if (local && p.canPaste) items.push({ id: "paste", label: "Paste", hint: "Ctrl+V" });
+  if (local && p.rel) items.push({ id: "rename", label: "Rename…", hint: "F2" }, { id: "delete", label: "Delete", hint: "Del" });
   if (local) items.push("-", { id: "reveal", label: revealLabel() }, { id: "terminal", label: "Open in Terminal" });
   if (p.dir || !p.rel) items.push("-", { id: "find-in-folder", label: "Find in Folder…", hint: "Ctrl+Shift+F" });
   // No separator first, last or twice in a row.
@@ -86,6 +89,9 @@ export function renderContext(p, t) {
     switch (id) {
       case "open": case "rename": request(id, p); break;
       case "find-in-folder": request(id, p, { folder: p.rel }); break;
+      case "cut": request(id, p); break;
+      // Into a folder, or beside a file, as New File does.
+      case "paste": request(id, p, { folder: p.dir ? p.rel : p.rel.slice(0, Math.max(p.rel.lastIndexOf("/"), 0)) }); break;
       // New entries go inside a folder, or beside a file.
       case "new-file": case "new-folder": request(id, p, { folder: p.dir ? p.rel : p.rel.slice(0, Math.max(p.rel.lastIndexOf("/"), 0)) }); break;
       case "delete": openDeleteDialog(p); break;
@@ -191,4 +197,32 @@ export function renderEditorContext(p, t) {
   };
   return v_flex().id("explorer-editor-context").size_full().p(6).text_size(13).text_color(t.foreground)
     .children(editorItems(p).map(it => it === "-" ? separator(t) : item(t, it.id, it.label, it.hint, (_e, cx) => act(it.id, cx))));
+}
+
+// --- Moving outside a git repository ------------------------------------------------------------
+
+// A move git can't undo: asked first (inside a repository the explorer moves directly).
+export function openMoveDialog(p) {
+  openOverlay({ mod: NAME, kind: "dialog", width: 460, height: 168, props: { ...p, menu: "move" } });
+}
+
+export function renderMove(p, t, handle) {
+  const yes = () => { request("move-confirmed", p, { folder: p.folder }); close(); };
+  const name = p.rel.slice(p.rel.lastIndexOf("/") + 1), into = p.folder ? p.folder.slice(p.folder.lastIndexOf("/") + 1) : p.rootName;
+  const button = (id, label, primary, onClick) => h_flex().id(id).h(32).px(14).items_center().rounded(8).cursor_pointer()
+    .border_1().border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.popover).text_color(primary ? t.solid_foreground : t.foreground)
+    .hover(s => s.opacity(0.88)).on_click(onClick).child(label);
+  return v_flex().id("explorer-move").track_focus(handle)
+    .on_key_down((e, cx) => {
+      if (e.key === "enter") yes();
+      else if (e.key === "escape") close();
+      else return;
+      cx.stop_propagation();
+    })
+    .size_full().p(18).gap(10).text_size(13).text_color(t.foreground)
+    .child(div().font_semibold().text_size(14).child(`Move “${name}” into “${into}”?`))
+    .child(div().text_color(t.muted).child("This folder isn't in a git repository, so git can't undo the move."))
+    .child(h_flex().flex_1().items_end().justify_end().gap(8)
+      .child(button("move-no", "Cancel", false, () => close()))
+      .child(button("move-yes", "Move", true, () => yes())));
 }

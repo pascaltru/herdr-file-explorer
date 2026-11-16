@@ -148,11 +148,21 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Open
   - New File…, New Folder…
   - Copy Path, Copy Relative Path
-  - Rename… (F2), Delete (Del)
+  - Cut (Ctrl+X), Paste (Ctrl+V, once something is cut), Rename… (F2), Delete (Del)
   - Reveal in File Explorer (Finder; on Linux, Open Containing Folder)
   - Open in Terminal
 
   Spaces on another machine get only Open, Copy Path and Copy Relative Path.
+- **Moving** (Cut / Paste): Cut dims the row (45% opacity) until it's pasted; Escape in the tree
+  forgets it. Paste puts it into the folder right-clicked or selected, or beside a file. Inside a git
+  repository it moves at once; elsewhere a dialog asks first ("Move “x.txt” into “d”?", git can't
+  undo it). Nothing moves into itself or over a name already in the target folder (a toast says
+  why). Open tabs, open folders and unsaved edits follow the move, as for a rename; the target
+  folder opens on it. Local spaces only.
+- **Undo** (`ctrl+z` in the tree; in a file it undoes typing): the last move or rename made in this
+  folder goes back, newest first, up to 20. It refuses, with a toast, when the entry isn't there
+  anymore or its old name is taken again. Undoing isn't itself undone (no redo). Creating and
+  deleting aren't undone here (deleted items are in the Recycle Bin or Trash).
 - **Naming and deleting:**
   - Names are typed in place, in the row. A new entry's row appears at the top of its folder.
     Invalid names show their reason under the tree.
@@ -212,7 +222,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - `git`: `rev-parse`, `ls-files -t -c -o --exclude-standard --directory` and `status --porcelain=v1
     --ignored=matching`, run in parallel; `grep` for search in folder
   - on Windows, `powershell` lists folders git doesn't describe and performs file actions: `New-Item`,
-    `Rename-Item`, Recycle Bin through `Microsoft.VisualBasic`, and `explorer /select`
+    `Rename-Item`, `Move-Item`, Recycle Bin through `Microsoft.VisualBasic`, and `explorer /select`
   - on macOS and Linux, `sh` lists folders; `mkdir`/`mv`, `osascript`/`open` or `gio`/`xdg-open`
     perform file actions
   - no network

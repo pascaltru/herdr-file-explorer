@@ -54,6 +54,12 @@ export async function rename(path, name) {
   else await run("mv", ["--", path, `${parentOf(path)}/${name}`]);
 }
 
+// Into another folder, keeping the name. The explorer checks the name is free first; -n is a backstop.
+export async function move(path, folder) {
+  if (platform() === "windows") await powershell(`Move-Item -LiteralPath ${quote(path)} -Destination ${quote(folder)}`);
+  else await run("mv", ["-n", "--", path, `${folder}/`]);
+}
+
 // Recoverable: the Recycle Bin on Windows, the Trash elsewhere.
 export async function trash(path, dir) {
   const p = platform();

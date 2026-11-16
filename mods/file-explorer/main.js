@@ -4,7 +4,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState, h_resizable, resizable_panel } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify, checking } from "herdr";
 import * as fs from "fs/promises";
-import { NAME, REQUEST, renderSettings, renderContext, renderDelete, renderUnsaved, renderEditorContext, contextItems, contextHeight, openDeleteDialog, openUnsavedDialog, openEditorMenu, editorMenuClosed } from "./menus.js";
+import { NAME, REQUEST, renderSettings, renderContext, renderDelete, renderUnsaved, renderEditorContext, contextItems, contextHeight, openDeleteDialog, openUnsavedDialog, openEditorMenu, editorMenuClosed, openMoveDialog, renderMove } from "./menus.js";
 import * as ops from "./ops.js";
 import { QuickOpen, remember } from "./quickopen.js";
 import { shownIn, sizedNode } from "./place.js";
@@ -238,7 +238,7 @@ export default class Explorer extends View {
       this.quick = new QuickOpen(this, cx);
       return;
     }
-    if (p?.menu === "context" || p?.menu === "editor" || p?.menu === "delete" || p?.menu === "unsaved") {
+    if (p?.menu === "context" || p?.menu === "editor" || p?.menu === "delete" || p?.menu === "unsaved" || p?.menu === "move") {
       this.menu = { kind: p.menu };
       if (p.menu !== "context" && p.menu !== "editor") { this.menu.handle = cx.focus_handle(); this.menu.handle.focus(); }
       return;
@@ -298,6 +298,10 @@ export default class Explorer extends View {
     this.entries = saved?.entries ?? new Map(); this.folders = saved?.folders ?? new Set(); this.marks = saved?.marks ?? {}; this.folderMarks = saved?.folderMarks ?? {}; this.ignored = saved?.ignored ?? new Set(); this.ignoredCache = new Map();
     this.ignoredEntries = saved?.ignoredEntries ?? []; this.deleted = saved?.deleted ?? new Set(); this.lazy = saved?.lazy ?? new Set();
     this.selected = saved?.selected ?? null; this.tabs = saved?.tabs ?? []; this.active = saved?.active ?? null;
+    // Cut: the entry waiting, dimmed, for a Paste (see cutEntry).
+    this.moving = saved?.moving ?? null;
+    // Ctrl+Z in the tree: the moves and renames made here, newest last (see undo).
+    this.undone = saved?.undone ?? [];
     // Under a filter, folders leading to a match show open unless closed there (filterClosed); a folder
     // matching by name alone shows closed unless opened there (filterOpened). The folders open
     // without a filter stay in `folders` for when it's cleared.
@@ -368,7 +372,7 @@ export default class Explorer extends View {
       for (const [rel, view] of this.views) this.release(view, rel);
       this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, deleted: this.deleted, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active,
         query: this.query, searchText: this.search.value(), changesOnly: this.changesOnly, filterClosed: this.filterClosed, filterOpened: this.filterOpened,
-        folderSearch: this.folderSearch, panelView: this.panelView, drafts: this.drafts });
+        folderSearch: this.folderSearch, panelView: this.panelView, drafts: this.drafts, moving: this.moving, undone: this.undone });
     }
     if (!root) { this.context = null; this.reset(); this.fit(); return; }
     this.reset(this.saved.get(`${on ?? ""}|${root}`));
@@ -762,6 +766,17 @@ export default class Explorer extends View {
     }
     if (this.editorKey(e, cx)) return;
     if (this.panelView === "search") { if (this.finder.key(e, cx)) { cx.stop_propagation(); cx.notify(); } return; }
+    const keys = e.modifiers, plainCtrl = keys.control && !keys.shift && !keys.alt;
+    if (plainCtrl && e.key === "z") { this.undo(cx); cx.stop_propagation(); return; }
+    if (plainCtrl && e.key === "x") { if (this.selected) this.cutEntry(this.selected, cx); cx.stop_propagation(); return; }
+    if (plainCtrl && e.key === "v") {
+      // Into the selected folder, or beside the selected file.
+      const sel = this.selected, isDir = sel && this.flat().find(r => r.path === sel)?.entry.dir;
+      this.pasteInto(!sel ? "" : isDir ? sel : sel.slice(0, Math.max(sel.lastIndexOf("/"), 0)), cx);
+      cx.stop_propagation();
+      return;
+    }
+    if (e.key === "escape" && this.moving) { this.moving = null; cx.stop_propagation(); cx.notify(); return; }
     const rows = this.flat(), i = rows.findIndex(r => r.path === this.selected), row = rows[i];
     let handled = true;
     switch (e.key) {
@@ -1195,6 +1210,7 @@ export default class Explorer extends View {
     if (this.menu.kind === "delete") return renderDelete(props(), t, this.menu.handle);
     if (this.menu.kind === "unsaved") return renderUnsaved(props(), t, this.menu.handle);
     if (this.menu.kind === "editor") return renderEditorContext(props(), t);
+    if (this.menu.kind === "move") return renderMove(props(), t, this.menu.handle);
     return renderSettings(this.menu, t, {
       onTheme: name => setShared(THEME_KEY, name),
       syntax: syntaxMode(), onSyntax: mode => setShared(SYNTAX_KEY, mode),
@@ -1208,7 +1224,8 @@ export default class Explorer extends View {
   // What the popups need to know about an entry ("" is the root folder).
   target(rel, dir) {
     const context = this.context;
-    return { rel, dir, root: context.root, full: this.join(rel), relative: this.windows() ? rel.replace(/\//g, "\\") : rel, remote: Boolean(context.on) };
+    return { rel, dir, root: context.root, full: this.join(rel), relative: this.windows() ? rel.replace(/\//g, "\\") : rel, remote: Boolean(context.on),
+      canPaste: Boolean(this.moving), rootName: context.root.split(/[\\/]/).filter(Boolean).pop() ?? "" };
   }
 
   // Right-click in the file's text (the editor keeps its selection: it doesn't move the cursor).
@@ -1285,6 +1302,9 @@ export default class Explorer extends View {
         else if (this.goto.open) this.goto.input.focus();
         else this.activeCode()?.focus();
       }
+      else if (r.action === "cut") this.cutEntry(r.rel, cx);
+      else if (r.action === "paste") this.pasteInto(r.folder ?? "", cx);
+      else if (r.action === "move-confirmed") this.moveEntry(r.rel, r.folder ?? "", cx);
       else if (r.action === "close-discard") this.closeTab(r.rel, cx, true);
       else if (r.action === "close-save") {
         const rel = r.rel;
@@ -1384,6 +1404,7 @@ export default class Explorer extends View {
         return;
       }
       if (this.context !== context) return;
+      if (edit.kind === "rename") this.remember({ from: edit.rel, to: rel });
       // A new file exists now (writeTextFile is quick): list and open it.
       if (edit.kind === "new" && !edit.dir) {
         this.setEntries(parent, [...(this.entries.get(parent) ?? []).filter(e => e.name !== name), { name, dir: false }]);
@@ -1404,6 +1425,108 @@ export default class Explorer extends View {
   // so it isn't read twice; an unwatched one (outside a repository, another machine) is read now.
   refreshAfter(cx, parent, context) {
     this.reload(cx, context.repo && !context.on && !context.poll ? [] : [parent], true);
+  }
+
+  remember(step) {
+    this.undone.push(step);
+    if (this.undone.length > 20) this.undone.shift();
+  }
+
+  // Ctrl+Z in the tree: the last move or rename made here goes back, if nothing took its place since.
+  // A rename and a move are the same step back: the entry returns to its old folder and name.
+  undo(cx) {
+    const step = this.undone.pop(), context = this.context;
+    if (!step || !context || context.on) return;
+    const parentOf = p => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : ""), nameOf = p => p.slice(p.lastIndexOf("/") + 1);
+    const back = parentOf(step.from), backName = nameOf(step.from), here = parentOf(step.to);
+    const fold = s => (this.windows() ? s.toLowerCase() : s);
+    // Folders not read yet can't be checked: the move or rename back then says what went wrong.
+    if (this.entries.has(here) && !this.entries.get(here).some(e => e.name === nameOf(step.to))) {
+      notify({ title: "Nothing to undo", body: `“${nameOf(step.to)}” isn't there anymore.`, level: "error" });
+      return;
+    }
+    const caseOnly = here === back && fold(backName) === fold(nameOf(step.to));
+    if (!caseOnly && (this.entries.get(back) ?? []).some(e => fold(e.name) === fold(backName))) {
+      notify({ title: "Couldn't undo", body: `“${back || context.root.split(/[\\/]/).filter(Boolean).pop()}” already has a “${backName}” again.`, level: "error" });
+      return;
+    }
+    if (here !== back) { this.moveEntry(step.to, back, cx, true); return; }
+    // A rename back, shown at once as a rename is.
+    const before = [...(this.entries.get(here) ?? [])];
+    this.setEntries(here, before.map(e => (e.name === nameOf(step.to) ? { name: backName, dir: e.dir } : e)));
+    this.moved(step.to, step.from);
+    this.selected = step.from;
+    this.version++;
+    cx.notify();
+    cx.spawn(async cx => {
+      try { await ops.rename(this.join(step.to, context), backName); }
+      catch (e) {
+        if (this.context !== context) return;
+        this.moved(step.from, step.to);
+        this.setEntries(here, before);
+        notify({ title: "Couldn't undo the rename", body: String(e?.message ?? e), level: "error" });
+        cx.notify();
+        return;
+      }
+      if (this.context !== context) return;
+      this.refreshAfter(cx, here, context);
+      cx.notify();
+    });
+  }
+
+  // Cut / Paste moves a file or folder into another folder. The cut entry is dimmed until it's pasted
+  // (Escape forgets it).
+  cutEntry(rel, cx) {
+    if (!rel || !this.context || this.context.on || rel.endsWith(NEW_ROW)) return;
+    this.moving = { rel };
+    cx.notify();
+  }
+
+  // Inside a git repository a move goes ahead (git can undo it); elsewhere it asks first.
+  pasteInto(folder, cx) {
+    const from = this.moving?.rel, context = this.context;
+    if (!from || !context || context.on) return;
+    const slash = from.lastIndexOf("/"), name = from.slice(slash + 1), parent = slash === -1 ? "" : from.slice(0, slash);
+    const where = folder || context.root.split(/[\\/]/).filter(Boolean).pop();
+    if (folder === parent) { this.moving = null; cx.notify(); return; }
+    if (folder === from || folder.startsWith(from + "/")) {
+      notify({ title: `Couldn't move ${name}`, body: "A folder can't go inside itself.", level: "error" });
+      return;
+    }
+    if ((this.entries.get(folder) ?? []).some(e => e.name === name)) {
+      notify({ title: `Couldn't move ${name}`, body: `“${where}” already has a “${name}”.`, level: "error" });
+      return;
+    }
+    const dir = Boolean(this.entries.get(parent)?.find(e => e.name === name)?.dir);
+    if (context.repo) this.moveEntry(from, folder, cx);
+    else openMoveDialog({ ...this.target(from, dir), folder });
+  }
+
+  // `undoing`: moving back for Ctrl+Z, which isn't remembered itself.
+  moveEntry(from, folder, cx, undoing = false) {
+    const context = this.context;
+    if (!context || context.on) return;
+    const slash = from.lastIndexOf("/"), name = from.slice(slash + 1), parent = slash === -1 ? "" : from.slice(0, slash);
+    const to = folder ? `${folder}/${name}` : name;
+    this.moving = null;
+    cx.notify();
+    cx.spawn(async cx => {
+      try { await ops.move(this.join(from, context), this.join(folder, context)); }
+      catch (e) {
+        notify({ title: `Couldn't move ${name}`, body: String(e?.message ?? e), level: "error" });
+        cx.notify();
+        return;
+      }
+      if (this.context !== context) return;
+      if (!undoing) this.remember({ from, to });
+      // Tabs, open folders and unsaved edits follow it, as for a rename; its new folder opens on it.
+      this.moved(from, to);
+      if (folder) this.folders.add(folder);
+      this.selected = to;
+      this.version++;
+      this.reload(cx, context.repo && !context.poll ? [] : [parent, folder], true);
+      cx.notify();
+    });
   }
 
   // A rename moves everything under the old path: open tabs, expanded folders and loaded listings,
@@ -1465,6 +1588,8 @@ export default class Explorer extends View {
     const guides = [];
     for (let level = 0; level < depth; level++) guides.push(div().absolute().top(0).bottom(0).left(4 + level * 16 + 6).w(1).bg(t.border));
     return h_flex().id(`row-${path}`).h(ROW).flex_none().mx(4).pl(4 + depth * 16).pr(8).gap(4).items_center().rounded(5).cursor_pointer().relative()
+      // Cut, waiting for a Paste.
+      .when(this.moving?.rel === path, el => el.opacity(0.45))
       .border_1().border_color(selected && focused ? t.accent : "#00000000")
       // The hover highlight comes from the pointer's position (see pointerMoved), not GPUI's hover.
       .when(selected, el => el.bg(t.selected)).when(hovered && !selected, el => el.bg(t.hover))
