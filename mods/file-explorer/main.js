@@ -37,6 +37,12 @@ async function loadConfig() {
 // "vscode" (the default), "terminal" (the terminal's font), or a font name.
 const fontChoice = () => shared(FONT_KEY) || installed.editorFont || "vscode";
 
+// Every line break is CRLF (at least one, and no lone LF). A mixed file is saved as the editor holds
+// it: converting would rewrite its LF lines.
+function allCrlf(text) {
+  return text.includes("\r\n") && !/(^|[^\r])\n/.test(text);
+}
+
 function editorFont() {
   const choice = fontChoice(), size = [shared(SIZE_KEY), installed.editorFontSize].find(n => FONT_SIZES.includes(n)) ?? vscodeFont().size;
   // VS Code's line height (editor.lineHeight 0): the size times 1.35, or 1.5 on macOS, rounded.
@@ -924,6 +930,14 @@ export default class Explorer extends View {
       .child(button("conflict-keep", "Keep mine", cx => cx.spawn(async cx => { await this.save(rel, cx, true); })));
   }
 
+  // Find's stepping ends with a click or an edit in the text. The Enter binding follows the editor
+  // area's key context, which only a render applies: repaint, or Enter would still step.
+  endStepping(cx) {
+    if (!this.findBar.stepping) return;
+    this.findBar.stepping = false;
+    cx.notify();
+  }
+
   // Ctrl+G: the active tab's text must be there to count its lines.
   showGoTo(cx) {
     const code = this.activeCode();
@@ -1176,7 +1190,7 @@ export default class Explorer extends View {
         // Herdr writes only local files: another machine's files stay read-only.
         view.editable = !context.on;
         view.base = draft ? draft.base : text;
-        view.crlf = draft ? draft.crlf : text.includes("\r\n");
+        view.crlf = draft ? draft.crlf : allCrlf(text);
         view.code = EditorState.new({ language, readonly: !view.editable, value: draft ? draft.text : text,
           font_family: font.family, font_size: font.size,
           syntax: syntaxColors(t) });
@@ -1186,7 +1200,7 @@ export default class Explorer extends View {
         view.conflict = Boolean(draft) && text !== draft.base;
         view.code.on("change", (_e, cx) => {
           if (this.views.get(rel) !== view) return;
-          this.findBar.stepping = false;
+          this.endStepping(cx);
           this.edited(rel, view, cx);
         });
         cx.notify();
@@ -1582,7 +1596,6 @@ export default class Explorer extends View {
     const name = base(rel), before = [...(this.entries.get(parent) ?? [])], gone = p => p === rel || p.startsWith(rel + "/");
     // Off the tree at once; the Recycle Bin move runs behind it.
     this.setEntries(parent, before.filter(e => e.name !== name));
-    for (const tab of [...this.tabs]) if (gone(tab.rel)) this.closeTab(tab.rel, cx);
     this.folders = new Set([...this.folders].filter(f => !gone(f)));
     if (this.selected && gone(this.selected)) this.selected = parent || null;
     cx.notify();
@@ -1594,6 +1607,9 @@ export default class Explorer extends View {
         return;
       }
       if (this.context !== context) return;
+      // Its tabs close once it's really gone (the dialog asked already): a failed move keeps them,
+      // unsaved edits included.
+      for (const tab of [...this.tabs]) if (gone(tab.rel)) this.closeTab(tab.rel, cx, true);
       this.refreshAfter(cx, parent, context);
       cx.notify();
     });
@@ -1809,7 +1825,7 @@ export default class Explorer extends View {
       .on_action("explorer-find-next", (_e, cx) => this.findBar.step(1, cx))
       .on_action("explorer-find-previous", (_e, cx) => this.findBar.step(-1, cx))
       // A click in the text ends find's stepping: Enter is a new line again.
-      .on_mouse_down("left", () => { this.findBar.stepping = false; })
+      .on_mouse_down("left", (_e, cx) => this.endStepping(cx))
       .on_key_down((e, cx) => this.editorKey(e, cx, true))
       .on_size_change(size => { this.editorHeight = size.height / this.zoom(); })
       .child(h_flex().id("explorer-tabs").h(36).flex_none().bg(t.chrome).border_b(1).border_color(t.border).overflow_x_scrollbar().children(tabs))

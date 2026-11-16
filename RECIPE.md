@@ -54,8 +54,9 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
     instead of `×`.
   - `ctrl+s` saves with `writeTextFile(path, text, expected)`: Herdr writes only if the file still
     holds `expected`, the text the tab started from, so an agent's change in between is never
-    overwritten. New lines get the file's line endings (a CRLF file stays CRLF). Herdr's editor keeps
-    Ctrl+S, so it is bound like Ctrl+F (`ExplorerEditor > Input`).
+    overwritten. A file whose line breaks are all CRLF stays CRLF (new lines too); a mixed file is
+    saved as the editor holds it, so new lines there get LF. Herdr's editor keeps Ctrl+S, so it is
+    bound like Ctrl+F (`ExplorerEditor > Input`).
   - The file changes on disk: a tab without unsaved edits reloads; one with edits keeps them and
     shows a bar, "This file changed on disk since you started editing." with Reload (the file as it
     is) and Keep mine (writes the tab over it). A refused save shows the same bar. A file whose text
