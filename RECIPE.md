@@ -21,9 +21,10 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - When a folder lists more than 500 entries, a note at the bottom says "Some folders show only their
     first 500 entries".
 - **Editor column**, left of the tree, present only while files are open:
-  - A 34px tab strip on `chrome`. Each tab has a 14px icon, the name (12px), and a `×` button. The
-    active tab has the `background` color; a preview tab's name is italic. A tab's name takes the
-    file's git color.
+  - A 36px tab strip on `chrome`, as tall as the tree's header so their bottom lines meet. Each tab
+    has a 14px icon, the name (13px, as the tree), and a 22px close button (Lucide's `x`, 14px; `●`
+    with unsaved changes). The active tab has the `background` color; a preview tab's name is italic.
+    A tab's name takes the file's git color.
   - A 26px breadcrumb row: the folders in `muted`, separated by `›`, then the file's icon and name in
     `foreground`.
   - The file in Herdr's code editor, with line numbers and folding. Its font is VS Code's

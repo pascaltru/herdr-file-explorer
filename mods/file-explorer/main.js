@@ -1779,11 +1779,13 @@ export default class Explorer extends View {
         .on_mouse_down("middle", (_e, cx) => this.closeTab(tab.rel, cx))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.tabMenu(tab.rel, cx); })
         .when(Boolean(this.icon(base(tab.rel), false, false, 14, t)), el => el.child(this.icon(base(tab.rel), false, false, 14, t)))
-        .child(div().text_size(12).text_color(color).when(tab.preview, el => el.italic()).child(base(tab.rel)))
-        .child(div().id(`close-${tab.rel}`).w(18).h(18).flex().items_center().justify_center().rounded(4).text_size(12)
+        // Letters sit low in their line box: 1.5px up lines the name up with the icon and × (measured).
+        .child(div().relative().top(-1.5).text_size(13).text_color(color).when(tab.preview, el => el.italic()).child(base(tab.rel)))
+        // An icon: a text × stays small whatever its size.
+        .child(div().id(`close-${tab.rel}`).w(22).h(22).flex().items_center().justify_center().rounded(4).text_size(14)
           .text_color(on ? t.muted : t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click((_e, cx) => { cx.stop_propagation(); this.closeTab(tab.rel, cx); })
-          .child(this.views.get(tab.rel)?.dirty || this.drafts.has(tab.rel) ? "●" : "×"));
+          .child(this.views.get(tab.rel)?.dirty || this.drafts.has(tab.rel) ? div().child("●") : svg(`${MOD}/ui/x.svg`).size(14)));
     });
     const active = this.active, view = active ? this.view(active, cx) : null;
     const parts = active ? active.split("/") : [];
@@ -1810,7 +1812,7 @@ export default class Explorer extends View {
       .on_mouse_down("left", () => { this.findBar.stepping = false; })
       .on_key_down((e, cx) => this.editorKey(e, cx, true))
       .on_size_change(size => { this.editorHeight = size.height / this.zoom(); })
-      .child(h_flex().id("explorer-tabs").h(34).flex_none().bg(t.chrome).border_b(1).border_color(t.border).overflow_x_scrollbar().children(tabs))
+      .child(h_flex().id("explorer-tabs").h(36).flex_none().bg(t.chrome).border_b(1).border_color(t.border).overflow_x_scrollbar().children(tabs))
       .child(h_flex().h(26).flex_none().pl(12).pr(6).gap(6).items_center().text_size(12).overflow_hidden().children(crumbs)
         .when(Boolean(view?.code), el => el.child(div().flex_1()).child(div().id("explorer-find-open").w(22).h(22).flex_none().flex().items_center()
           .justify_center().rounded(4).cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
