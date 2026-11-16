@@ -122,3 +122,32 @@ export function renderDelete(p, t, handle) {
       .child(button("delete-no", "Cancel", false, () => close()))
       .child(button("delete-yes", `Move to ${trashName()}`, true, () => yes())));
 }
+
+// --- Closing a tab with unsaved edits -----------------------------------------------------------
+
+export function openUnsavedDialog(p) {
+  openOverlay({ mod: NAME, kind: "dialog", width: 460, height: 168, props: { ...p, menu: "unsaved" } });
+}
+
+// Save, Don't Save or Cancel, as editors ask. Enter saves; Escape cancels.
+export function renderUnsaved(p, t, handle) {
+  const answer = action => { request(action, p); close(); };
+  const name = p.rel.slice(p.rel.lastIndexOf("/") + 1);
+  const button = (id, label, primary, onClick) => h_flex().id(id).h(32).px(14).items_center().rounded(8).cursor_pointer()
+    .border_1().border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.popover).text_color(primary ? t.solid_foreground : t.foreground)
+    .hover(s => s.opacity(0.88)).on_click(onClick).child(label);
+  return v_flex().id("explorer-unsaved").track_focus(handle)
+    .on_key_down((e, cx) => {
+      if (e.key === "enter") answer("close-save");
+      else if (e.key === "escape") close();
+      else return;
+      cx.stop_propagation();
+    })
+    .size_full().p(18).gap(10).text_size(13).text_color(t.foreground)
+    .child(div().font_semibold().text_size(14).child(`Save the changes to “${name}”?`))
+    .child(div().text_color(t.muted).child("Your changes are lost if you don't save them."))
+    .child(h_flex().flex_1().items_end().justify_end().gap(8)
+      .child(button("unsaved-cancel", "Cancel", false, () => close()))
+      .child(button("unsaved-discard", "Don't Save", false, () => answer("close-discard")))
+      .child(button("unsaved-save", "Save", true, () => answer("close-save"))));
+}

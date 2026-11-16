@@ -8,8 +8,8 @@ behavior changes.
 ## Layout of the code
 
 - `mods/file-explorer/main.js` — the Explorer view: tree, git colors, folder watching, editor tabs.
-- `menus.js` — gear menu, right-click menu, delete dialog (this mod as an overlay, `props().menu`);
-  they reach the explorer through a shared request (`Explorer.handleRequest`).
+- `menus.js` — gear menu, right-click menu, delete and unsaved-changes dialogs (this mod as an
+  overlay, `props().menu`); they reach the explorer through a shared request (`Explorer.handleRequest`).
 - `ops.js` — file operations (PowerShell on Windows, usual tools elsewhere); `quickopen.js` — Quick Open;
   `find.js` — go to line, find in file; `search.js` — search in folder (the panel's Search view);
   `place.js` — finds the explorer's block in the layout.
@@ -37,6 +37,8 @@ behavior changes.
     `cx.timer` that writes JSON to `~/.config/herdr-app/cache/explorer-debug.json`).
   - Read that file.
   - Reinstall to remove the hook, and confirm `grep -c TESTHOOK` gives 0.
+- A dialog opened by a test (an overlay) survives a reinstall: close it with
+  `herdr-app do overlay.close '{}'`.
 - Temporary test spaces are fine: `herdr-app do space.new '{"name":"x","folder":"C:/..."}'` (forward
   slashes; backslashes break the JSON). Close them afterwards with `space.close {id, confirmed:true}`,
   and `space.select` the user's previous space. A new space starts with the panel hidden; use

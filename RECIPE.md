@@ -59,6 +59,10 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
     shows a bar, "This file changed on disk since you started editing." with Reload (the file as it
     is) and Keep mine (writes the tab over it). A refused save shows the same bar. A file whose text
     is already the tab's (your own save) isn't reloaded, so the cursor stays.
+  - Closing a tab with unsaved edits (`×`, which shows `●`, or a middle click) opens a 460px dialog:
+    "Save the changes to “name”?", "Your changes are lost if you don't save them.", and Cancel,
+    Don't Save, Save (`solid`, Enter). Escape cancels. A refused save keeps the tab open, with its
+    "changed on disk" bar. A tab not shown since a space switch saves from its draft.
   - Unsaved edits survive a space switch, a theme, color or font change and a catch-up: the editor
     is recreated from a draft (its undo history is lost; Herdr's editor can't be given one).
   - Find while editing: after Enter or `F3` the editor has the keyboard and Enter keeps stepping
@@ -170,7 +174,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - the width it resizes is the nearest node on the path that sits in a row
 - **Files** in `mods/file-explorer/`:
   - `main.js`: tree, editor and gear-menu wiring
-  - `menus.js`: the gear, right-click and delete popups
+  - `menus.js`: the gear, right-click, delete and unsaved-changes popups
   - `ops.js`: file actions
   - `quickopen.js`: Quick Open
   - `find.js`: go to line, find in file
@@ -241,7 +245,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Remote spaces can't be watched (polling instead), can't preview images, and offer only the
     read-only actions.
   - Unsaved edits live in the explorer: quitting Herdr or reloading the mod loses them (mods get no
-    warning). Closing a tab with unsaved edits discards them.
+    warning).
 
 ## Done when
 

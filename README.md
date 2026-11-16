@@ -14,7 +14,8 @@ file icons and git colors, and editor tabs beside it, in the right-hand panel.
   folder keeps its own filter.
 - **Editing:** type in an open file; a dot on its tab marks unsaved changes, and `ctrl+s` saves. If
   the file changes on disk meanwhile (an agent), the tab keeps your edits and offers Reload or Keep
-  mine; a save never overwrites a change it didn't see. Files on another machine are read-only.
+  mine; a save never overwrites a change it didn't see. Closing a tab with unsaved changes asks: Save,
+  Don't Save or Cancel. Files on another machine are read-only.
 - **Go to line:** `ctrl+g` in an open file, then a line number or `line:column` and Enter.
 - **Find in file:** `ctrl+f`, `F3`, or the magnifier above the file. Enter or `F3` goes to the next
   match (Shift: the previous one), and Enter keeps stepping until you click or type in the file;

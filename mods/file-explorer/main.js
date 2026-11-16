@@ -4,7 +4,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState, h_resizable, resizable_panel } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify, checking } from "herdr";
 import * as fs from "fs/promises";
-import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItems, contextHeight, openDeleteDialog } from "./menus.js";
+import { NAME, REQUEST, renderSettings, renderContext, renderDelete, renderUnsaved, contextItems, contextHeight, openDeleteDialog, openUnsavedDialog } from "./menus.js";
 import * as ops from "./ops.js";
 import { QuickOpen, remember } from "./quickopen.js";
 import { shownIn, sizedNode } from "./place.js";
@@ -238,9 +238,9 @@ export default class Explorer extends View {
       this.quick = new QuickOpen(this, cx);
       return;
     }
-    if (p?.menu === "context" || p?.menu === "delete") {
+    if (p?.menu === "context" || p?.menu === "delete" || p?.menu === "unsaved") {
       this.menu = { kind: p.menu };
-      if (p.menu === "delete") { this.menu.handle = cx.focus_handle(); this.menu.handle.focus(); }
+      if (p.menu !== "context") { this.menu.handle = cx.focus_handle(); this.menu.handle.focus(); }
       return;
     }
     // Requests are kept in shared state across restarts: only act on ones made from now on.
@@ -944,9 +944,14 @@ export default class Explorer extends View {
     this.h.focus();
   }
 
-  closeTab(rel, cx) {
+  // `force`: without asking about unsaved edits (Don't Save, or after saving them).
+  closeTab(rel, cx, force = false) {
     const i = this.tabs.findIndex(t => t.rel === rel);
     if (i === -1) return;
+    if (!force && (this.views.get(rel)?.dirty || this.drafts.has(rel))) {
+      openUnsavedDialog({ rel, dir: false, root: this.context?.root });
+      return;
+    }
     this.tabs.splice(i, 1);
     this.drop(rel, true);
     if (this.active === rel) this.active = this.tabs[Math.min(i, this.tabs.length - 1)]?.rel ?? null;
@@ -1050,7 +1055,14 @@ export default class Explorer extends View {
   // agent's change in between isn't overwritten: the "changed on disk" bar shows instead. `force`
   // (Keep mine) writes over the file as it is now.
   async save(rel, cx, force = false) {
-    const view = this.views.get(rel), context = this.context;
+    const view = this.views.get(rel), context = this.context, draft = this.drafts.get(rel);
+    // A tab not shown since a space switch holds its edits as a draft, with no editor.
+    if (!view?.code && draft && !context.on) {
+      const text = draft.crlf ? draft.text.replace(/\r?\n/g, "\r\n") : draft.text;
+      try { await writeTextFile(this.join(rel, context), text, draft.base); this.drafts.delete(rel); } catch {}
+      cx.notify();
+      return;
+    }
     if (!view?.code || !view.editable || (!view.dirty && !force)) return;
     const path = this.join(rel, context), text = this.fileText(view);
     try {
@@ -1159,6 +1171,7 @@ export default class Explorer extends View {
   renderMenu(t) {
     if (this.menu.kind === "context") return renderContext(props(), t);
     if (this.menu.kind === "delete") return renderDelete(props(), t, this.menu.handle);
+    if (this.menu.kind === "unsaved") return renderUnsaved(props(), t, this.menu.handle);
     return renderSettings(this.menu, t, {
       onTheme: name => setShared(THEME_KEY, name),
       syntax: syntaxMode(), onSyntax: mode => setShared(SYNTAX_KEY, mode),
@@ -1204,6 +1217,15 @@ export default class Explorer extends View {
       else if (r.action === "rename") this.startRename(r.rel, cx);
       else if (r.action === "new-file" || r.action === "new-folder") this.startNew(r.folder ?? "", r.action === "new-folder", cx);
       else if (r.action === "delete") this.remove(r.rel, r.dir, cx);
+      else if (r.action === "close-discard") this.closeTab(r.rel, cx, true);
+      else if (r.action === "close-save") {
+        const rel = r.rel;
+        cx.spawn(async cx => {
+          await this.save(rel, cx);
+          // A refused save (changed on disk) keeps the tab, with its bar.
+          if (!this.views.get(rel)?.dirty && !this.drafts.has(rel)) this.closeTab(rel, cx, true);
+        });
+      }
       else if (r.action === "find-in-folder") {
         this.openSearch(r.folder ?? "", cx);
         // The closing menu hands the copy "focus" afterwards: keep it in the search box.
