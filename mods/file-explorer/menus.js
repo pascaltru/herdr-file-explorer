@@ -151,3 +151,44 @@ export function renderUnsaved(p, t, handle) {
       .child(button("unsaved-discard", "Don't Save", false, () => answer("close-discard")))
       .child(button("unsaved-save", "Save", true, () => answer("close-save"))));
 }
+
+// --- Right-click in the editor ------------------------------------------------------------------
+
+// The editor's own actions run in the explorer (it holds the editor): the popup asks for them.
+export function editorItems(p) {
+  const items = [];
+  if (p.editable && p.selection) items.push({ id: "editor-cut", label: "Cut", hint: "Ctrl+X" });
+  if (p.selection) items.push({ id: "editor-copy", label: "Copy", hint: "Ctrl+C" });
+  if (p.editable) items.push({ id: "editor-paste", label: "Paste", hint: "Ctrl+V" });
+  items.push("-", { id: "editor-reference", label: p.selection ? "Copy Reference to Lines" : "Copy Reference" },
+    { id: "copy-path", label: "Copy Path" }, { id: "copy-relative", label: "Copy Relative Path" });
+  items.push("-", { id: "editor-find", label: "Find in File", hint: "Ctrl+F" }, { id: "editor-goto", label: "Go to Line…", hint: "Ctrl+G" });
+  if (p.editable && p.dirty) items.push("-", { id: "editor-save", label: "Save", hint: "Ctrl+S" });
+  return items.filter((it, i, all) => it !== "-" || (i > 0 && i < all.length - 1 && all[i - 1] !== "-"));
+}
+
+export function openEditorMenu(p) {
+  openOverlay({ mod: NAME, kind: "popup", width: 260, height: contextHeight(editorItems(p)), props: { ...p, menu: "editor" } });
+}
+
+// The editor stops drawing its selection while the menu has the keyboard, and Herdr sends the
+// explorer no "focus" when this popup closes: closing without asking for an action (Escape, a click
+// beside it, Copy Path) asks for the keyboard to go back to the editor. One request at a time: the
+// shared slot keeps only the last one.
+let editorMenuAsked = false;
+
+export function editorMenuClosed(p) {
+  if (!editorMenuAsked) request("editor-refocus", p);
+  editorMenuAsked = false;
+}
+
+export function renderEditorContext(p, t) {
+  const act = (id, cx) => {
+    if (id === "copy-path") cx.write_to_clipboard(p.full);
+    else if (id === "copy-relative") cx.write_to_clipboard(p.relative);
+    else { request(id, p); editorMenuAsked = true; }
+    close();
+  };
+  return v_flex().id("explorer-editor-context").size_full().p(6).text_size(13).text_color(t.foreground)
+    .children(editorItems(p).map(it => it === "-" ? separator(t) : item(t, it.id, it.label, it.hint, (_e, cx) => act(it.id, cx))));
+}

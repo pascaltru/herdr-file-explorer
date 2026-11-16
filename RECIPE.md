@@ -68,6 +68,17 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Find while editing: after Enter or `F3` the editor has the keyboard and Enter keeps stepping
     (a binding for `FindStepping > Input`, switched on by the editor area's `key_context`); a click
     or an edit in the text ends it. Letters always go to the file.
+- **Right-click in a file's text** (not its tabs or bars): a 260px popup at the pointer.
+  - Cut, Copy, Paste (Cut and Paste in editable files, Cut and Copy with a selection).
+  - Copy Reference (to Lines, with a selection): `@path#5-10` (`#5` for one line, the bare path
+    without a selection), the form Claude Code's VS Code extension inserts; a toast confirms it.
+    A selection ending at the start of a line doesn't take that line.
+  - Copy Path, Copy Relative Path; Find in File, Go to Line…; Save (with unsaved edits).
+  - The popup is this mod as an overlay: it asks the explorer, which holds the editor, through the
+    shared request. While it's open the selection isn't drawn (it has the keyboard); when it
+    closes, the editor gets the keyboard back so the selection shows again, or the box an action
+    opened does. Herdr sends no "focus" when this popup closes: the popup's copy asks from its
+    `close()` (`editor-refocus`) unless it already asked for an action.
 - **Go to line:** `ctrl+g` (from the editor or the tree, with a file tab open) shows a bar above the
   file: "Go to line", a box, and the file's range (`1–207`). A line number, or `line:column`, and Enter
   put the cursor there, in the middle of the editor, and give the editor the keyboard. Anything else
@@ -178,7 +189,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - the width it resizes is the nearest node on the path that sits in a row
 - **Files** in `mods/file-explorer/`:
   - `main.js`: tree, editor and gear-menu wiring
-  - `menus.js`: the gear, right-click, delete and unsaved-changes popups
+  - `menus.js`: the gear, right-click (tree and editor), delete and unsaved-changes popups
   - `ops.js`: file actions
   - `quickopen.js`: Quick Open
   - `find.js`: go to line, find in file

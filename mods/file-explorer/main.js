@@ -4,7 +4,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState, h_resizable, resizable_panel } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify, checking } from "herdr";
 import * as fs from "fs/promises";
-import { NAME, REQUEST, renderSettings, renderContext, renderDelete, renderUnsaved, contextItems, contextHeight, openDeleteDialog, openUnsavedDialog } from "./menus.js";
+import { NAME, REQUEST, renderSettings, renderContext, renderDelete, renderUnsaved, renderEditorContext, contextItems, contextHeight, openDeleteDialog, openUnsavedDialog, openEditorMenu, editorMenuClosed } from "./menus.js";
 import * as ops from "./ops.js";
 import { QuickOpen, remember } from "./quickopen.js";
 import { shownIn, sizedNode } from "./place.js";
@@ -238,9 +238,9 @@ export default class Explorer extends View {
       this.quick = new QuickOpen(this, cx);
       return;
     }
-    if (p?.menu === "context" || p?.menu === "delete" || p?.menu === "unsaved") {
+    if (p?.menu === "context" || p?.menu === "editor" || p?.menu === "delete" || p?.menu === "unsaved") {
       this.menu = { kind: p.menu };
-      if (p.menu !== "context") { this.menu.handle = cx.focus_handle(); this.menu.handle.focus(); }
+      if (p.menu !== "context" && p.menu !== "editor") { this.menu.handle = cx.focus_handle(); this.menu.handle.focus(); }
       return;
     }
     // Requests are kept in shared state across restarts: only act on ones made from now on.
@@ -1163,6 +1163,7 @@ export default class Explorer extends View {
   }
 
   async close() {
+    if (this.menu?.kind === "editor") editorMenuClosed(props());
     for (const view of this.views?.values() ?? []) this.release(view);
   }
 
@@ -1192,6 +1193,7 @@ export default class Explorer extends View {
     if (this.menu.kind === "context") return renderContext(props(), t);
     if (this.menu.kind === "delete") return renderDelete(props(), t, this.menu.handle);
     if (this.menu.kind === "unsaved") return renderUnsaved(props(), t, this.menu.handle);
+    if (this.menu.kind === "editor") return renderEditorContext(props(), t);
     return renderSettings(this.menu, t, {
       onTheme: name => setShared(THEME_KEY, name),
       syntax: syntaxMode(), onSyntax: mode => setShared(SYNTAX_KEY, mode),
@@ -1206,6 +1208,42 @@ export default class Explorer extends View {
   target(rel, dir) {
     const context = this.context;
     return { rel, dir, root: context.root, full: this.join(rel), relative: this.windows() ? rel.replace(/\//g, "\\") : rel, remote: Boolean(context.on) };
+  }
+
+  // Right-click in the file's text (the editor keeps its selection: it doesn't move the cursor).
+  editorMenu(cx) {
+    const rel = this.active, view = rel ? this.views.get(rel) : null, code = view?.code;
+    if (!this.context || !code) return;
+    const range = code.selected_range();
+    openEditorMenu({ ...this.target(rel, false), selection: range.end > range.start, editable: Boolean(view.editable), dirty: Boolean(view.dirty) });
+  }
+
+  // What the editor menu asks for, on the active tab.
+  editorAction(action, cx) {
+    const rel = this.active, view = rel ? this.views.get(rel) : null, code = view?.code;
+    if (!code) return;
+    const text = code.value(), range = code.selected_range(), picked = text.slice(range.start, range.end);
+    if (action === "editor-copy" && picked) cx.write_to_clipboard(picked);
+    else if (action === "editor-cut" && picked && view.editable) { cx.write_to_clipboard(picked); code.replace(""); code.focus(); }
+    else if (action === "editor-paste" && view.editable) {
+      const pasted = cx.read_from_clipboard();
+      if (pasted) code.replace(pasted);
+      code.focus();
+    } else if (action === "editor-reference") {
+      // The form Claude Code's VS Code extension inserts for a selection: @path#5-10. A selection
+      // ending at the start of a line doesn't take that line.
+      let ref = `@${rel}`;
+      if (picked) {
+        const first = lineAt(text, range.start), last = lineAt(text, range.end - (text[range.end - 1] === "\n" ? 1 : 0));
+        ref += first === last ? `#${first}` : `#${first}-${last}`;
+      }
+      cx.write_to_clipboard(ref);
+      notify({ title: "Reference copied", body: `${ref}: paste it in an agent's prompt.` });
+    }
+    else if (action === "editor-find") this.showFind(cx);
+    else if (action === "editor-goto") this.showGoTo(cx);
+    else if (action === "editor-save") cx.spawn(async cx => { await this.save(rel, cx); });
+    cx.notify();
   }
 
   contextMenu(rel, cx) {
@@ -1228,7 +1266,7 @@ export default class Explorer extends View {
     this.lastRequest = r.id;
     if (!this.context || r.root !== this.context.root) return;
     // Another machine's space only reads: no file changes there.
-    if (this.context.on && !["open", "reveal", "find-in-folder"].includes(r.action)) return;
+    if (this.context.on && !["open", "reveal", "find-in-folder", "editor-copy", "editor-reference", "editor-find", "editor-goto", "editor-refocus"].includes(r.action)) return;
     // Rendering is no place to change state: act right after. A timer rather than cx.spawn: the
     // edit schedules its own timer, which a finished task's context drops.
     cx.timer.after(0, cx => {
@@ -1237,6 +1275,15 @@ export default class Explorer extends View {
       else if (r.action === "rename") this.startRename(r.rel, cx);
       else if (r.action === "new-file" || r.action === "new-folder") this.startNew(r.folder ?? "", r.action === "new-folder", cx);
       else if (r.action === "delete") this.remove(r.rel, r.dir, cx);
+      else if (r.action.startsWith("editor-")) {
+        if (r.rel !== this.active) return;
+        this.editorAction(r.action, cx);
+        // The menu had the keyboard: it goes back to the box an action opened, else to the editor, so
+        // the selection is drawn again (see editorMenuClosed).
+        if (this.findBar.open) this.findBar.focusInput();
+        else if (this.goto.open) this.goto.input.focus();
+        else this.activeCode()?.focus();
+      }
       else if (r.action === "close-discard") this.closeTab(r.rel, cx, true);
       else if (r.action === "close-save") {
         const rel = r.rel;
@@ -1591,7 +1638,8 @@ export default class Explorer extends View {
         .child(div().text_color(last ? t.foreground : t.muted).child(part)));
     });
     const body = !view ? div()
-      : view.code ? Editor.new(view.code).flex_1().min_h(0).line_height(`${editorFont().lineHeight}px`)
+      : view.code ? v_flex().id("explorer-editor-body").flex_1().min_h(0).on_mouse_down("right", (_e, cx) => this.editorMenu(cx))
+        .child(Editor.new(view.code).flex_1().min_h(0).line_height(`${editorFont().lineHeight}px`))
       : view.picture ? div().flex_1().min_h(0).p(16).flex().items_center().justify_center().child(image(view.picture).max_w_full().max_h_full())
       : div().p(16).text_color(t.dim).child(view.message ?? "Loading…");
     return v_flex().id("explorer-editor").flex_1().min_w(0).h_full().min_h(0)
