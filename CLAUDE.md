@@ -11,7 +11,7 @@ behavior changes.
 - `menus.js` — gear menu, right-click menu, delete dialog (this mod as an overlay, `props().menu`);
   they reach the explorer through a shared request (`Explorer.handleRequest`).
 - `ops.js` — file operations (PowerShell on Windows, usual tools elsewhere); `quickopen.js` — Quick Open;
-  `find.js` — go to line; `search.js` — search in folder (the panel's Search view);
+  `find.js` — go to line, find in file; `search.js` — search in folder (the panel's Search view);
   `place.js` — finds the explorer's block in the layout.
 - `icon-themes/` is generated: never hand-edit; run `python scripts/build-icon-themes.py`
   (`--material <ver>` / `--vscode <ver>` to bump; versions pinned in `versions.json`).
@@ -85,8 +85,9 @@ behavior changes.
 - **Herdr's editor** (`EditorState`, tested):
   - `set_selected_range` scrolls only as far as needed, and only for the last call in a frame.
   - A selection is drawn only while the editor has the keyboard (`code.focus()`).
-  - With the editor focused, Ctrl+F never reaches the mod, not even through `keys.json`. Ctrl+G, F3,
-    Ctrl+Shift+F and Escape do reach `on_key_down` on its parent.
+  - With the editor focused, Ctrl+F never reaches `on_key_down` or `keys.json`: the editor binds it.
+    `cx.bind_keys` with a context (`ExplorerEditor > Input`) out-binds it, because a later binding
+    wins. Ctrl+G, F3, Ctrl+Shift+F and Escape do reach `on_key_down` on its parent.
 - **Syntax:** Herdr's editor bundles few grammars. `LANG`/`LANG_BY_NAME` map other types to a close
   relative (TS→js, ps1/Dockerfile→sh, tf→ruby, kt→java, swift→rust, csproj→xml).
 

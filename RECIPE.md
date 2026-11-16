@@ -53,6 +53,20 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   put the cursor there, in the middle of the editor, and give the editor the keyboard. Anything else
   turns the box's border red. Escape closes the bar. Herdr's editor scrolls only as far as a selection
   needs, so the jump selects half a screen below, then above, frame by frame, before the target.
+- **Find in file:** `ctrl+f`, `F3` or the magnifier at the right of the path row shows a bar above the
+  file: the box with `Aa` (match case), "3 of 14" (or "No results", with the box's border red),
+  ↑ ↓ and `×`. A one-line selection fills the box.
+  - Typing scrolls to the first match from the cursor (not highlighted yet: Herdr's editor draws a
+    selection only while it has the keyboard). Enter or `F3` goes to the next match, Shift with either
+    to the previous one: the match is selected in the middle of the editor, which gets the keyboard so
+    it shows. The bar stays in charge: from the editor, Enter keeps stepping, and letters or Backspace
+    edit the query and bring the keyboard back to the box, so it feels as if it never left. Escape
+    closes the bar.
+  - Plain text, up to 10,000 matches. Only the current match is highlighted: Herdr's editor can't
+    mark several. Go to line and find share the place above the file; opening one closes the other.
+  - Herdr's editor binds Ctrl+F to a search panel it never shows, and keeps the key. The explorer binds
+    it again with `cx.bind_keys`, for `ExplorerEditor > Input` (its editor area declares that
+    `key_context`), to an `explorer-find` action: a later binding for the same context wins.
 - **Toolbar** (under the header, as in Visual Studio's Solution Explorer):
   - Filter in explorer (funnel icon): keeps the files and folders whose name contains the text
     (case-insensitive, not fuzzy), with the folders leading to them, open. A folder matching only by
@@ -143,7 +157,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - `menus.js`: the gear, right-click and delete popups
   - `ops.js`: file actions
   - `quickopen.js`: Quick Open
-  - `find.js`: go to line
+  - `find.js`: go to line, find in file
   - `search.js`: search in folder (the panel's Search view)
   - `place.js`: layout lookups
   - `icon-themes/`: Seti and Material, VS Code icon-theme JSON plus SVGs, and VS Code's

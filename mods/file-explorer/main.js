@@ -8,7 +8,7 @@ import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItem
 import * as ops from "./ops.js";
 import { QuickOpen, remember } from "./quickopen.js";
 import { shownIn, sizedNode } from "./place.js";
-import { GoToLine, offsetOf } from "./find.js";
+import { GoToLine, FindBar, offsetOf, lineAt } from "./find.js";
 import { FolderSearch, newSearch } from "./search.js";
 
 const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CACHE = "cache/file-explorer";
@@ -263,7 +263,10 @@ export default class Explorer extends View {
     this.search.on("blur", () => { this.searchFocused = false; });
     this.search.on("submit", (_e, cx) => this.intoResults(cx));
     // A jump waits here until its file's editor exists (a tab opened from a search result reads first).
-    this.goto = new GoToLine(this); this.pendingJump = null;
+    this.goto = new GoToLine(this); this.findBar = new FindBar(this); this.pendingJump = null;
+    // Herdr's editor binds Ctrl+F to a search it never shows, and keeps the key. The keymap is the
+    // app's: a binding for an input inside this explorer's editor area, made later, wins over it.
+    if (!checking()) cx.bind_keys([{ keystroke: "ctrl-f", action: "explorer-find", context: "ExplorerEditor > Input" }]);
     this.modPath = MOD; this.finder = new FolderSearch(this, cx);
     // Remote spaces can't be watched, and a failed watch falls back to polling.
     // Herdr keeps a hidden panel's mod running: it refreshes once shown again instead (see render).
@@ -775,15 +778,27 @@ export default class Explorer extends View {
     if (handled) { cx.stop_propagation(); cx.notify(); }
   }
 
-  // Keys for the open file, from the tree or the editor area. Herdr's editor keeps Ctrl+F to itself,
-  // but lets these through.
-  editorKey(e, cx) {
+  // Keys for the open file, from the tree or the editor area (Ctrl+F from the text comes as an action).
+  editorKey(e, cx, fromEditor = false) {
     const m = e.modifiers;
+    // The find bar is open but the editor has the keyboard (after Enter): Enter keeps stepping, and
+    // typing goes to the box.
+    if (fromEditor && this.findBar.open && !this.findBar.boxFocused && this.activeCode()) {
+      if (e.key === "enter" && !m.control && !m.alt) { this.findBar.step(m.shift ? -1 : 1, cx); cx.stop_propagation(); return true; }
+      if (this.findBar.typeIntoBox(e, cx)) { cx.stop_propagation(); return true; }
+    }
     if (e.key === "g" && m.control && !m.shift && !m.alt && this.showGoTo(cx)) { cx.stop_propagation(); return true; }
     if (e.key === "f" && m.control && m.shift && !m.alt && this.context) { this.openSearch(null, cx); cx.stop_propagation(); return true; }
-    if (e.key === "escape" && this.goto.open) {
-      this.goto.hide(cx);
-      this.views.get(this.active)?.code?.focus();
+    if (e.key === "f3" && !m.control && !m.alt) {
+      if (this.findBar.open && this.activeCode()) this.findBar.step(m.shift ? -1 : 1, cx);
+      else if (!this.showFind(cx)) return false;
+      cx.stop_propagation();
+      return true;
+    }
+    if (e.key === "f" && m.control && !m.shift && !m.alt && this.showFind(cx)) { cx.stop_propagation(); return true; }
+    if (e.key === "escape" && (this.goto.open || this.findBar.open)) {
+      if (this.goto.open) this.goto.hide(cx); else this.findBar.hide(cx);
+      this.activeCode()?.focus();
       cx.stop_propagation();
       return true;
     }
@@ -834,28 +849,53 @@ export default class Explorer extends View {
     const jump = this.pendingJump, code = this.views.get(rel)?.code;
     if (!jump || jump.rel !== rel || !code) return;
     this.pendingJump = null;
-    const text = code.value(), start = offsetOf(text, jump.line, jump.col);
-    // The editor scrolls only as far as a selection needs, leaving it at an edge, and only for the
-    // last one of a frame. Selecting half a screen below, then above, frame by frame, first puts
-    // the target in the middle, as VS Code does.
+    const start = offsetOf(code.value(), jump.line, jump.col);
+    await this.revealRange(code, start, start + jump.length, true, cx);
+  }
+
+  activeCode() { return this.active ? this.views.get(this.active)?.code ?? null : null; }
+
+  // From an event: the selection needs frames to come, so it runs in a task.
+  showRange(code, start, end, focus, cx) {
+    cx.spawn(async cx => { await this.revealRange(code, start, end, focus, cx); });
+  }
+
+  // Selects [start, end) in the middle of the editor. It scrolls only as far as a selection needs,
+  // leaving it at an edge, and only for the last one of a frame: selecting half a screen below,
+  // then above, frame by frame, first puts the target in the middle, as VS Code does. A newer call
+  // (F3 held down) takes over.
+  async revealRange(code, start, end, focus, cx) {
+    const seq = this.revealSeq = (this.revealSeq ?? 0) + 1;
+    this.revealing = true;
+    const text = code.value(), line = lineAt(text, start);
     const half = Math.floor(((this.editorHeight ?? 600) - 60) / editorFont().lineHeight / 2);
-    for (const line of [jump.line + half, Math.max(1, jump.line - half)]) {
-      const at = offsetOf(text, line, 1);
+    for (const l of [line + half, Math.max(1, line - half)]) {
+      const at = offsetOf(text, l, 1);
       code.set_selected_range({ start: at, end: at });
       cx.notify();
       await cx.sleep(20);
+      if (seq !== this.revealSeq) return;
     }
-    code.set_selected_range({ start, end: start + jump.length });
-    code.focus();
+    this.revealing = false;
+    code.set_selected_range({ start, end });
+    if (focus) code.focus();
     cx.notify();
   }
 
   // Ctrl+G: the active tab's text must be there to count its lines.
   showGoTo(cx) {
-    const code = this.active ? this.views.get(this.active)?.code : null;
+    const code = this.activeCode();
     if (!code) return false;
+    this.findBar.open = false;
     this.goto.show(code, cx);
     return true;
+  }
+
+  // F3, Ctrl+F or the magnifier.
+  showFind(cx) {
+    if (!this.activeCode()) return false;
+    this.goto.open = false;
+    return this.findBar.show(cx);
   }
 
   // Quick Open's choice: open the folders down to the file, select it, scroll to it, open it.
@@ -1405,11 +1445,16 @@ export default class Explorer extends View {
       : view.picture ? div().flex_1().min_h(0).p(16).flex().items_center().justify_center().child(image(view.picture).max_w_full().max_h_full())
       : div().p(16).text_color(t.dim).child(view.message ?? "Loading…");
     return v_flex().id("explorer-editor").flex_1().min_w(0).h_full().min_h(0)
-      .on_key_down((e, cx) => this.editorKey(e, cx))
+      .key_context("ExplorerEditor").on_action("explorer-find", (_e, cx) => this.showFind(cx))
+      .on_key_down((e, cx) => this.editorKey(e, cx, true))
       .on_size_change(size => { this.editorHeight = size.height / this.zoom(); })
       .child(h_flex().id("explorer-tabs").h(34).flex_none().bg(t.chrome).border_b(1).border_color(t.border).overflow_x_scrollbar().children(tabs))
-      .child(h_flex().h(26).flex_none().px(12).gap(6).items_center().text_size(12).overflow_hidden().children(crumbs))
+      .child(h_flex().h(26).flex_none().pl(12).pr(6).gap(6).items_center().text_size(12).overflow_hidden().children(crumbs)
+        .when(Boolean(view?.code), el => el.child(div().flex_1()).child(div().id("explorer-find-open").w(22).h(22).flex_none().flex().items_center()
+          .justify_center().rounded(4).cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .tooltip("Find in file (Ctrl+F)").on_click((_e, cx) => this.showFind(cx)).child(svg(`${MOD}/ui/search.svg`).size(13)))))
       .when(this.goto.open && Boolean(view?.code), el => el.child(this.goto.render(t)))
+      .when(this.findBar.open && Boolean(view?.code), el => el.child(this.findBar.render(t)))
       .child(body);
   }
 
