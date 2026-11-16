@@ -8,6 +8,7 @@ import { NAME, REQUEST, renderSettings, renderContext, renderDelete, contextItem
 import * as ops from "./ops.js";
 import { QuickOpen, remember } from "./quickopen.js";
 import { shownIn, sizedNode } from "./place.js";
+import { GoToLine, offsetOf } from "./find.js";
 
 const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CACHE = "cache/file-explorer";
 const MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
@@ -260,6 +261,8 @@ export default class Explorer extends View {
     this.search.on("focus", () => { this.searchFocused = true; });
     this.search.on("blur", () => { this.searchFocused = false; });
     this.search.on("submit", (_e, cx) => this.intoResults(cx));
+    // A jump waits here until its file's editor exists (a tab opened from a search result reads first).
+    this.goto = new GoToLine(this); this.pendingJump = null;
     // Remote spaces can't be watched, and a failed watch falls back to polling.
     // Herdr keeps a hidden panel's mod running: it refreshes once shown again instead (see render).
     cx.timer.every(10000, cx => {
@@ -731,6 +734,7 @@ export default class Explorer extends View {
       else if (e.key === "down") { this.intoResults(cx); cx.stop_propagation(); }
       return;
     }
+    if (this.editorKey(e, cx)) return;
     const rows = this.flat(), i = rows.findIndex(r => r.path === this.selected), row = rows[i];
     let handled = true;
     switch (e.key) {
@@ -755,6 +759,20 @@ export default class Explorer extends View {
       default: handled = this.typeToFind(e, rows, i);
     }
     if (handled) { cx.stop_propagation(); cx.notify(); }
+  }
+
+  // Keys for the open file, from the tree or the editor area. Herdr's editor keeps Ctrl+F to itself,
+  // but lets these through.
+  editorKey(e, cx) {
+    const m = e.modifiers;
+    if (e.key === "g" && m.control && !m.shift && !m.alt && this.showGoTo(cx)) { cx.stop_propagation(); return true; }
+    if (e.key === "escape" && this.goto.open) {
+      this.goto.hide(cx);
+      this.views.get(this.active)?.code?.focus();
+      cx.stop_propagation();
+      return true;
+    }
+    return false;
   }
 
   // Typing a name jumps to the next row starting with it, as in VS Code and Zed.
@@ -788,6 +806,41 @@ export default class Explorer extends View {
     if (this.context) remember(this.context.root, rel);
     this.fit();
     cx.notify();
+  }
+
+  // Selects `length` characters at a 1-based line and column of a file tab, and gives the editor the
+  // keyboard: only then is a selection drawn.
+  jumpTo(rel, line, col, length, cx) {
+    this.pendingJump = { rel, line, col, length };
+    cx.spawn(async cx => { await this.applyJump(rel, cx); });
+  }
+
+  async applyJump(rel, cx) {
+    const jump = this.pendingJump, code = this.views.get(rel)?.code;
+    if (!jump || jump.rel !== rel || !code) return;
+    this.pendingJump = null;
+    const text = code.value(), start = offsetOf(text, jump.line, jump.col);
+    // The editor scrolls only as far as a selection needs, leaving it at an edge, and only for the
+    // last one of a frame. Selecting half a screen below, then above, frame by frame, first puts
+    // the target in the middle, as VS Code does.
+    const half = Math.floor(((this.editorHeight ?? 600) - 60) / editorFont().lineHeight / 2);
+    for (const line of [jump.line + half, Math.max(1, jump.line - half)]) {
+      const at = offsetOf(text, line, 1);
+      code.set_selected_range({ start: at, end: at });
+      cx.notify();
+      await cx.sleep(20);
+    }
+    code.set_selected_range({ start, end: start + jump.length });
+    code.focus();
+    cx.notify();
+  }
+
+  // Ctrl+G: the active tab's text must be there to count its lines.
+  showGoTo(cx) {
+    const code = this.active ? this.views.get(this.active)?.code : null;
+    if (!code) return false;
+    this.goto.show(code, cx);
+    return true;
   }
 
   // Quick Open's choice: open the folders down to the file, select it, scroll to it, open it.
@@ -870,6 +923,8 @@ export default class Explorer extends View {
         view.code = EditorState.new({ language, readonly: true, value: text,
           font_family: font.family, font_size: font.size,
           syntax: syntaxColors(t) });
+        cx.notify();
+        await this.applyJump(rel, cx);
       } catch { if (this.views.get(rel) === view) view.message = "Can't preview this file: it's over 1 MB or unreadable"; }
       finally { cx.notify(); }
     });
@@ -1279,8 +1334,11 @@ export default class Explorer extends View {
       : view.picture ? div().flex_1().min_h(0).p(16).flex().items_center().justify_center().child(image(view.picture).max_w_full().max_h_full())
       : div().p(16).text_color(t.dim).child(view.message ?? "Loading…");
     return v_flex().id("explorer-editor").flex_1().min_w(0).h_full().min_h(0)
+      .on_key_down((e, cx) => this.editorKey(e, cx))
+      .on_size_change(size => { this.editorHeight = size.height / this.zoom(); })
       .child(h_flex().id("explorer-tabs").h(34).flex_none().bg(t.chrome).border_b(1).border_color(t.border).overflow_x_scrollbar().children(tabs))
       .child(h_flex().h(26).flex_none().px(12).gap(6).items_center().text_size(12).overflow_hidden().children(crumbs))
+      .when(this.goto.open && Boolean(view?.code), el => el.child(this.goto.render(t)))
       .child(body);
   }
 

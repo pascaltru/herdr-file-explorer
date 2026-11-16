@@ -12,6 +12,7 @@ file icons and git colors, and read-only editor tabs beside it, in the right-han
   Visual Studio. Pending changes shows only changed files (it combines with the search). Collapse closes
   every folder. In the search box, Escape clears it and Down or Enter moves into the results. Each
   folder keeps its own filter.
+- **Go to line:** `ctrl+g` in an open file, then a line number or `line:column` and Enter.
 - **Git:** VS Code's letters and colors (U, A, M, D, C); folders holding changes get a dot; ignored files are dimmed.
 - **Right-click** a file, a folder or empty space: Open, New File…, New Folder…, Copy Path,
   Copy Relative Path, Rename… (F2), Delete (Del, to the Recycle Bin or Trash after a confirmation),

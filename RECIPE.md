@@ -48,6 +48,11 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Clicking a folder opens or closes it.
   - Clicking a file opens a preview tab; the next preview replaces it. A double-click keeps the tab.
   - Clicking a tab shows it; double-clicking keeps it; a middle click or `×` closes it.
+- **Go to line:** `ctrl+g` (from the editor or the tree, with a file tab open) shows a bar above the
+  file: "Go to line", a box, and the file's range (`1–207`). A line number, or `line:column`, and Enter
+  put the cursor there, in the middle of the editor, and give the editor the keyboard. Anything else
+  turns the box's border red. Escape closes the bar. Herdr's editor scrolls only as far as a selection
+  needs, so the jump selects half a screen below, then above, frame by frame, before the target.
 - **Toolbar** (under the header, as in Visual Studio's Solution Explorer):
   - Search in explorer: keeps the files and folders whose name contains the text (case-insensitive, not
     fuzzy), with the folders leading to them, open. A folder matching only by its own name shows
@@ -116,6 +121,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - `menus.js`: the gear, right-click and delete popups
   - `ops.js`: file actions
   - `quickopen.js`: Quick Open
+  - `find.js`: go to line
   - `place.js`: layout lookups
   - `icon-themes/`: Seti and Material, VS Code icon-theme JSON plus SVGs, and VS Code's
     extension-to-language table
