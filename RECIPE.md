@@ -69,8 +69,14 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
     "Save the changes to “name”?", "Your changes are lost if you don't save them.", and Cancel,
     Don't Save, Save (`solid`, Enter). Escape cancels. A refused save keeps the tab open, with its
     "changed on disk" bar. A tab not shown since a space switch saves from its draft.
-  - Unsaved edits survive a space switch, a theme, color or font change and a catch-up: the editor
-    is recreated from a draft (its undo history is lost; Herdr's editor can't be given one).
+  - Editors outlive a space switch, a catch-up, a rename and a move: each folder's snapshot keeps its
+    `EditorState`s, so undo history, cursor and scroll come back with the space. Coming back, each
+    one is checked against the disk as a change would be. At most 15 editors are kept in all; past
+    that, the least recently shown ones of other spaces are let go. A rename that changes the
+    language (`.txt` to `.js`) recreates the editor.
+  - Unsaved edits still survive when an editor is let go, recreated for a theme, color or font change
+    (also one made while its space wasn't shown), or for another language: it's made again from a
+    draft, without its undo history (Herdr's editor can't be given one).
   - Find while editing: after Enter or `F3` the editor has the keyboard and Enter keeps stepping
     (a binding for `FindStepping > Input`, switched on by the editor area's `key_context`); a click
     or an edit in the text ends it. Letters always go to the file.
@@ -229,7 +235,8 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   - Changes inside ignored folders (`node_modules`, `obj`) don't run git.
   - Outside a repository, and on other machines, the explorer polls every 10 seconds instead.
   - While the explorer is hidden (panel closed, or another tab of its stack shown), it does no work. It
-    catches up when shown again.
+    catches up when shown again: the tree refreshes, and open files that changed meanwhile reload (or
+    show the "changed on disk" bar).
 - **Quick Open (`ctrl-e`):**
   - Before you type, it lists recently opened files. Typing ranks the repository's files by fuzzy
     match: letters at word starts and in a row score higher, and scattered letters lose points.
@@ -355,5 +362,6 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   `ctrl+g`, a line number, Enter: the cursor goes there.
 - `ctrl+shift+f`, a word, Enter: the Search view lists the matches by file; clicking one opens the file
   at it.
+- Typing in a file, switching to another space and back: `ctrl+z` still undoes the typing.
 - The gear menu switches icon theme, syntax colors, font and size live, without closing open tabs.
 - Hiding the panel stops all refreshes; showing it again catches up.

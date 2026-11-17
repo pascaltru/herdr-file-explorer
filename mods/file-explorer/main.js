@@ -11,7 +11,7 @@ import { shownIn, sizedNode } from "./place.js";
 import { GoToLine, FindBar, offsetOf, lineAt } from "./find.js";
 import { FolderSearch, newSearch } from "./search.js";
 
-const PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CACHE = "cache/file-explorer";
+const MAX_EDITORS = 15, PER_FOLDER = 500, TOTAL = 5000, PREFETCH = 40, MAX_GIT_PATHS = 200000, CACHE = "cache/file-explorer";
 const MOD = `mods/${NAME}`, THEMES = `${MOD}/icon-themes`, DEFAULT_THEME = "seti";
 // The settings menu's choice. Shared state rather than config.json: writing a file in the mod
 // folder would hot-reload the explorer and close its tabs.
@@ -72,6 +72,8 @@ const VSCODE_SYNTAX = {
 
 // "vscode" (the default) or "theme": colors taken from the Herdr theme's palette.
 const syntaxMode = () => (shared(SYNTAX_KEY) === "theme" ? "theme" : "vscode");
+// What an editor is drawn with: one made under another key is recreated (see render, switchTo).
+const editorStyle = () => { const font = editorFont(); return `${syntaxMode()}-${settings().dark}-${font.family}-${font.size}`; };
 
 function syntaxColors(t) {
   if (syntaxMode() === "vscode") return VSCODE_SYNTAX[settings().dark === false ? "light" : "dark"];
@@ -321,7 +323,7 @@ export default class Explorer extends View {
     // Unsaved edits of tabs whose editor was let go (see release).
     this.drafts = saved?.drafts ?? new Map();
     this.finder?.load(this.folderSearch);
-    this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.cut = new Set(); this.gitLimited = false;
+    this.views = saved?.views ?? new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.cut = new Set(); this.gitLimited = false;
     // Under a filter: the contents of untracked folders git lists only as a folder (see loadUntracked).
     this.untracked = null;
     this.version++;
@@ -379,8 +381,8 @@ export default class Explorer extends View {
     // Coming back reloads in full, so the old folder's watch would only hold one of Herdr's 64 slots.
     old?.watch?.cancel();
     if (old) {
-      for (const [rel, view] of this.views) this.release(view, rel);
-      this.saved.set(`${old.on ?? ""}|${old.root}`, { entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, deleted: this.deleted, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active,
+      // The editors stay with the folder (undo history, cursor and scroll), up to MAX_EDITORS in all.
+      this.saved.set(`${old.on ?? ""}|${old.root}`, { views: this.views, entries: this.entries, folders: this.folders, marks: this.marks, folderMarks: this.folderMarks, ignored: this.ignored, ignoredEntries: this.ignoredEntries, deleted: this.deleted, lazy: this.lazy, selected: this.selected, tabs: this.tabs, active: this.active,
         query: this.query, searchText: this.search.value(), changesOnly: this.changesOnly, filterClosed: this.filterClosed, filterOpened: this.filterOpened,
         folderSearch: this.folderSearch, panelView: this.panelView, drafts: this.drafts, moving: this.moving, undone: this.undone });
     }
@@ -388,6 +390,10 @@ export default class Explorer extends View {
     this.reset(this.saved.get(`${on ?? ""}|${root}`));
     // Outside a repository (a terminal in the home folder), a recursive watch would see every file on disk: poll instead.
     this.context = { root, on, repo, want: null, busy: false, poll: !repo, watched: false, watch: null };
+    this.evictEditors();
+    // Files may have changed while the folder wasn't watched; editors drawn with another font or
+    // colors are made again (from a draft, if edited).
+    for (const [rel, view] of [...this.views]) { if (view.code && view.style !== editorStyle()) this.drop(rel); else this.stale(rel, cx); }
     this.reload(cx, null, true);
     this.watch(cx);
     this.fit();
@@ -1173,6 +1179,25 @@ export default class Explorer extends View {
     if (view.picture) fs.unlink(`${appHome()}/${view.picture}`).catch(() => {});
   }
 
+  // Other folders' editors past MAX_EDITORS, least recently shown first, are let go: their unsaved
+  // edits wait as drafts in that folder's snapshot, as before editors were kept.
+  evictEditors() {
+    const kept = [];
+    // The folder shown came back from its snapshot, which still holds the same editors.
+    for (const snap of this.saved.values()) if (snap.views !== this.views) for (const [rel, view] of snap.views ?? []) kept.push({ snap, rel, view });
+    let extra = this.views.size + kept.length - MAX_EDITORS;
+    if (extra <= 0) return;
+    kept.sort((a, b) => (a.view.used ?? 0) - (b.view.used ?? 0));
+    for (const { snap, rel, view } of kept) {
+      if (extra-- <= 0) break;
+      this.settle(view);
+      if (view.code && view.dirty) snap.drafts.set(rel, { text: view.code.value(), base: view.base, crlf: view.crlf });
+      view.code?.release();
+      if (view.picture) fs.unlink(`${appHome()}/${view.picture}`).catch(() => {});
+      snap.views.delete(rel);
+    }
+  }
+
   // `discard`: unsaved edits go too (Reload, or closing the tab).
   drop(rel, discard = false) {
     const view = this.views.get(rel);
@@ -1276,8 +1301,9 @@ export default class Explorer extends View {
 
   view(rel, cx) {
     let view = this.views.get(rel);
-    if (view) return view;
-    view = { code: null, picture: null, message: null };
+    if (view) { view.used = Date.now(); return view; }
+    // `rel` follows a rename (see moved); the loading below still uses the name it started with.
+    view = { rel, code: null, picture: null, message: null, used: Date.now(), style: editorStyle() };
     this.views.set(rel, view);
     const context = this.context, path = this.join(rel), ext = extension(rel);
     cx.spawn(async cx => {
@@ -1301,6 +1327,7 @@ export default class Explorer extends View {
         view.editable = !context.on;
         view.base = draft ? draft.base : text;
         view.crlf = draft ? draft.crlf : allCrlf(text);
+        view.language = language;
         view.code = EditorState.new({ language, readonly: !view.editable, value: draft ? draft.text : text,
           font_family: font.family, font_size: font.size,
           syntax: syntaxColors(t) });
@@ -1309,9 +1336,9 @@ export default class Explorer extends View {
         // The file changed while the edits waited as a draft.
         view.conflict = Boolean(draft) && text !== draft.base;
         view.code.on("change", (_e, cx) => {
-          if (this.views.get(rel) !== view) return;
+          if (this.views.get(view.rel) !== view) return;
           this.endStepping(cx);
-          this.onEdit(rel, view, cx);
+          this.onEdit(view.rel, view, cx);
         });
         cx.notify();
         await this.applyJump(rel, cx);
@@ -1337,6 +1364,7 @@ export default class Explorer extends View {
   async close() {
     if (this.menu?.kind === "editor") editorMenuClosed(props());
     for (const view of this.views?.values() ?? []) this.release(view);
+    for (const snap of this.saved?.values() ?? []) if (snap.views !== this.views) for (const view of snap.views?.values() ?? []) this.release(view);
   }
 
   // --- Settings ----------------------------------------------------------------------
@@ -1691,7 +1719,17 @@ export default class Explorer extends View {
   // so a renamed folder keeps showing its contents.
   moved(from, to) {
     const map = p => (p === from ? to : p.startsWith(from + "/") ? to + p.slice(from.length) : p);
-    for (const tab of this.tabs) { const next = map(tab.rel); if (next !== tab.rel) { this.drop(tab.rel); tab.rel = next; } }
+    for (const tab of this.tabs) {
+      const next = map(tab.rel);
+      if (next === tab.rel) continue;
+      // The same editor under the new name keeps its undo history, unless it's still loading or the
+      // new name means another language.
+      const view = this.views.get(tab.rel), ext = extension(next);
+      const language = LANG_BY_NAME[base(next).toLowerCase()] ?? LANG[ext] ?? (ext || "txt");
+      if (view?.code && view.language === language) { this.views.delete(tab.rel); this.views.set(next, view); view.rel = next; }
+      else this.drop(tab.rel);
+      tab.rel = next;
+    }
     this.drafts = new Map([...this.drafts].map(([rel, draft]) => [map(rel), draft]));
     if (this.active) this.active = map(this.active);
     this.folders = new Set([...this.folders].map(map));
@@ -1969,7 +2007,7 @@ export default class Explorer extends View {
     this.sync(cx);
     this.followTheme(cx);
     // Open files are colored when they're read: a new syntax choice, font or appearance reads them again.
-    const font = editorFont(), syntax = `${syntaxMode()}-${settings().dark}-${font.family}-${font.size}`;
+    const syntax = editorStyle();
     if (this.syntaxSeen !== undefined && syntax !== this.syntaxSeen) for (const tab of this.tabs) this.drop(tab.rel);
     this.syntaxSeen = syntax;
     this.handleRequest(cx);
@@ -1977,7 +2015,8 @@ export default class Explorer extends View {
     if (this.context?.missed && shownIn()) {
       this.context.missed = false;
       this.reload(cx, null, true);
-      for (const tab of this.tabs) this.drop(tab.rel);
+      // Open files changed meanwhile reload (or, with unsaved edits, show the "changed on disk" bar).
+      for (const tab of this.tabs) this.stale(tab.rel, cx);
     }
     // ctrl-shift-e shows the panel; give the tree the keyboard as it appears. The tab bar also
     // reopens it after a space switch, which must leave the keyboard in the terminal.
