@@ -278,6 +278,7 @@ export default class Explorer extends View {
     if (!checking()) cx.bind_keys([
       { keystroke: "ctrl-f", action: "explorer-find", context: "ExplorerEditor > Input" },
       { keystroke: "ctrl-s", action: "explorer-save", context: "ExplorerEditor > Input" },
+      { keystroke: "ctrl-h", action: "explorer-replace", context: "ExplorerEditor > Input" },
       { keystroke: "f2", action: "explorer-rename", context: "ExplorerTree" },
       { keystroke: "enter", action: "explorer-find-next", context: "FindStepping > Input" },
       { keystroke: "shift-enter", action: "explorer-find-previous", context: "FindStepping > Input" },
@@ -865,6 +866,8 @@ export default class Explorer extends View {
       return true;
     }
     if (e.key === "f" && m.control && !m.shift && !m.alt && this.showFind(cx)) { cx.stop_propagation(); return true; }
+    if (e.key === "h" && m.control && !m.shift && !m.alt && this.activeEditable() && this.showFind(cx, true)) { cx.stop_propagation(); return true; }
+    if (e.key === "enter" && m.control && m.alt && this.findBar.open && this.findBar.replaceFocused) { this.findBar.replaceAll(cx); cx.stop_propagation(); return true; }
     if (e.key === "s" && m.control && !m.shift && !m.alt && this.activeCode()) {
       const rel = this.active;
       cx.spawn(async cx => { await this.save(rel, cx); });
@@ -986,13 +989,15 @@ export default class Explorer extends View {
     return true;
   }
 
-  // F3, Ctrl+F or the magnifier.
-  showFind(cx) {
+  // F3, Ctrl+F or the magnifier; Ctrl+H (`replace`) with the replace row.
+  showFind(cx, replace = false) {
     if (!this.activeCode()) return false;
     this.showSource(this.active);
     this.goto.open = false;
-    return this.findBar.show(cx);
+    return this.findBar.show(cx, replace);
   }
+
+  activeEditable() { return Boolean(this.active && this.views.get(this.active)?.editable); }
 
   // A Markdown tab shown rendered (see editor) goes back to its text: finding and jumping need the editor.
   showSource(rel) {
@@ -1938,6 +1943,7 @@ export default class Explorer extends View {
     return v_flex().id("explorer-editor").flex_1().min_w(0).h_full().min_h(0)
       .key_context(this.findBar.open && this.findBar.stepping ? "ExplorerEditor FindStepping" : "ExplorerEditor")
       .on_action("explorer-find", (_e, cx) => this.showFind(cx))
+      .on_action("explorer-replace", (_e, cx) => { if (this.activeEditable()) this.showFind(cx, true); })
       .on_action("explorer-save", (_e, cx) => { const rel = this.active; if (rel) cx.spawn(async cx => { await this.save(rel, cx); }); })
       .on_action("explorer-find-next", (_e, cx) => this.findBar.step(1, cx))
       .on_action("explorer-find-previous", (_e, cx) => this.findBar.step(-1, cx))

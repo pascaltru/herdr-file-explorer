@@ -95,16 +95,29 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   turns the box's border red. Escape closes the bar. Herdr's editor scrolls only as far as a selection
   needs, so the jump selects half a screen below, then above, frame by frame, before the target.
 - **Find in file:** `ctrl+f`, `F3` or the magnifier at the right of the path row shows a bar above the
-  file: the box with `Aa` (match case), "3 of 14" (or "No results", with the box's border red),
-  ↑ ↓ and `×`. A one-line selection fills the box.
+  file: the box with three toggles inside (Match case `Aa`, Match whole word and Use regular
+  expression, as in the Search view), "3 of 14" (or "No results", or "Invalid regex" in `ansi1`, with
+  the box's border red), ↑ ↓ and `×`. A one-line selection fills the box (escaped while the regex
+  toggle is on). Regular expressions are JavaScript's, with `^` and `$` at each line; whole word means
+  no letter, digit or `_` just before or after.
   - Typing scrolls to the first match from the cursor (not highlighted yet: Herdr's editor draws a
     selection only while it has the keyboard). Enter or `F3` goes to the next match, Shift with either
     to the previous one: the match is selected in the middle of the editor, which gets the keyboard so
     it shows. From the editor, Enter keeps stepping until a click or an edit in the text (see
     Editing). In a read-only file, letters and Backspace edit the query and bring the keyboard back
     to the box. Escape closes the bar.
-  - Plain text, up to 10,000 matches. Only the current match is highlighted: Herdr's editor can't
-    mark several. Go to line and find share the place above the file; opening one closes the other.
+  - Up to 10,000 matches. Only the current match is highlighted: Herdr's editor can't mark several.
+    Go to line and find share the place above the file; opening one closes the other.
+  - **Replace** (editable files): a chevron at the bar's left, or `ctrl+h` (bound like Ctrl+F, as
+    `explorer-replace`), shows a second row: a Replace box, then Replace and Replace All buttons.
+    `ctrl+h` with a query already there puts the keyboard in the Replace box.
+    - Replace (Enter in the box) selects the current match and types the replacement over it with
+      `EditorState.replace` (one undo step), then shows the next match after it; the keyboard stays
+      in the box. Stepping's Enter binding is switched off while the box has the keyboard.
+    - Replace All (`ctrl+alt+enter` in the box) replaces every match, past the 10,000 shown, in one
+      edit: the stretch from the first match to the last is typed over, so one `ctrl+z` undoes it.
+      The cursor goes to the first one.
+    - With the regex toggle, the replacement takes JavaScript's `$1`, `$&`, `$<name>` and `$$`.
   - Herdr's editor binds Ctrl+F to a search panel it never shows, and keeps the key. The explorer binds
     it again with `cx.bind_keys`, for `ExplorerEditor > Input` (its editor area declares that
     `key_context`), to an `explorer-find` action: a later binding for the same context wins.

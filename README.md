@@ -38,7 +38,11 @@ with find in file, search in folder and Quick Open.
 - **Go to line:** `ctrl+g` in an open file, then a line number or `line:column` and Enter.
 - **Find in file:** `ctrl+f`, `F3`, or the magnifier above the file. Enter or `F3` goes to the next
   match (Shift: the previous one), and Enter keeps stepping until you click or type in the file;
-  Escape closes. Only the current match is highlighted.
+  Escape closes. Match case, whole word and regular expression toggles sit in the box. Only the
+  current match is highlighted.
+- **Replace:** `ctrl+h`, or the chevron at the left of the find bar. Enter replaces the current match
+  and moves to the next; Replace All (`ctrl+alt+enter`) replaces every match in one step, undone by
+  one `ctrl+z`. Regular expressions take `$1` in the replacement.
 - **Markdown preview:** the eye above a `.md` file shows it rendered (with unsaved edits); the `<>`
   button goes back to the text. Links to files of the folder open in tabs, web links in the browser.
 
