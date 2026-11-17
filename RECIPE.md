@@ -120,10 +120,14 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
 - **Toolbar** (under the header, as in Visual Studio's Solution Explorer):
   - Filter in explorer (funnel icon): keeps the files and folders whose name contains the text
     (case-insensitive, not fuzzy), with the folders leading to them, open. A folder matching only by
-    its own name shows closed; opened, it shows everything it holds. Files inside an untracked or
-    ignored folder that was never opened aren't found: git doesn't list them.
+    its own name shows closed; opened, it shows everything it holds.
   - Pending changes (toggle, highlighted while on): only entries with a git letter or dot. It combines
     with the filter.
+  - Both filters find files inside untracked folders never opened: the tree's `ls-files --directory`
+    lists such a folder as one entry, so while a filter is on, `git ls-files -z -o --exclude-standard`
+    lists their files one by one, again on each git refresh. They fill in only the folders not read
+    from disk, and go when the filter is cleared. Files in ignored folders never opened aren't found
+    (`node_modules` would be huge).
   - Collapse: closes every folder, or every folder shown under a filter.
   - Under a filter, folders can still be closed and opened; the folders open without a filter come
     back when it's cleared. Escape in the box clears the filter; Down or Enter moves to the first
@@ -322,6 +326,8 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   typing `file-explorer` shows that folder closed under `mods`, and opening it shows all its files;
   Pending changes on its own lists exactly the files `git status` shows; Collapse leaves only the top
   level.
+- In a new untracked folder `a/b/` holding `c.txt`, typing `c.txt` in the filter shows `a`, `b` and
+  `c.txt` open without opening them first.
 - Dragging a file from the tree onto a terminal types its quoted path at the prompt; a plain click on
   the row still opens it.
 - `ctrl-e`, then typing `mainjs`, ranks `main.js` first; Enter opens it and selects it in the tree.

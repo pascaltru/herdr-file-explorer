@@ -321,6 +321,8 @@ export default class Explorer extends View {
     this.drafts = saved?.drafts ?? new Map();
     this.finder?.load(this.folderSearch);
     this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.cut = new Set(); this.gitLimited = false;
+    // Under a filter: the contents of untracked folders git lists only as a folder (see loadUntracked).
+    this.untracked = null;
     this.version++;
   }
 
@@ -467,6 +469,7 @@ export default class Explorer extends View {
               // Both git calls at once: the tree needs the status's ignored and deleted entries.
               const [structure, list] = await Promise.all([this.status(context), this.listFiles(context)]);
               if (this.context === context) this.gitTree(context, structure, list);
+              if (this.filtering() && this.context === context) await this.loadUntracked(context);
             }
             rels = rels.filter(r => this.isLazy(r));
             if (rels.length && this.context === context) await this.load(rels, context);
@@ -579,6 +582,33 @@ export default class Explorer extends View {
     this.version++;
   }
 
+  // The tree lists an untracked folder as one entry (--directory), so a name filter wouldn't find the
+  // files inside one never opened. While a filter is on, git lists those files one by one; they
+  // fill in only the folders not read from disk. Ignored folders stay unsearched: they can be huge.
+  async loadUntracked(context) {
+    const seq = this.untrackedSeq = (this.untrackedSeq ?? 0) + 1;
+    const r = await exec("git", ["--no-optional-locks", "ls-files", "-z", "-o", "--exclude-standard"], { cwd: context.root, on: context.on, timeout: 60000 }).catch(() => null);
+    if (seq !== this.untrackedSeq || this.context !== context || !this.filtering() || r?.code !== 0) return;
+    const tree = new Map();
+    let count = 0;
+    for (const path of r.stdout.split("\0")) {
+      if (!path || ++count > MAX_GIT_PATHS) continue;
+      const parts = path.split("/");
+      let parent = "";
+      parts.forEach((name, i) => {
+        if (this.isLazy(parent)) {
+          const names = tree.get(parent) ?? tree.set(parent, new Map()).get(parent);
+          names.set(name, i < parts.length - 1 || names.get(name) === true);
+        }
+        parent = parent ? `${parent}/${name}` : name;
+      });
+    }
+    const untracked = new Map();
+    for (const [folder, names] of tree) untracked.set(folder, sortEntries([...names].map(([name, dir]) => ({ name, dir }))).slice(0, PER_FOLDER));
+    this.untracked = untracked;
+    this.version++;
+  }
+
   isLazy(rel) {
     for (let path = rel; path; path = path.slice(0, Math.max(path.lastIndexOf("/"), 0))) if (this.lazy.has(path)) return true;
     return false;
@@ -641,13 +671,18 @@ export default class Explorer extends View {
 
   refilter(cx) {
     this.filterClosed.clear(); this.filterOpened.clear();
+    if (!this.filtering()) this.untracked = null;
+    else if (!this.untracked && this.context?.repo) {
+      const context = this.context;
+      cx.spawn(async cx => { await this.loadUntracked(context); cx.notify(); });
+    }
     this.scrollTop = 0;
     this.version++;
     cx.notify();
   }
 
   clearFilter() {
-    this.query = ""; this.changesOnly = false; this.filterClosed.clear(); this.filterOpened.clear();
+    this.query = ""; this.changesOnly = false; this.filterClosed.clear(); this.filterOpened.clear(); this.untracked = null;
     this.search.set_value("");
     this.version++;
   }
@@ -705,15 +740,16 @@ export default class Explorer extends View {
     if (this.flatCache?.version === this.version) return this.flatCache.rows;
     // Under a filter, as in Visual Studio: the files and folders matching by name, and the folders
     // leading to them. A folder matching only by its own name starts closed; opened, it shows all it
-    // holds. Only folders already read count: an unopened untracked or ignored folder isn't searched.
+    // holds. Folders not read yet count through git's list of untracked files; ignored ones don't.
     let shown = null, matched = null;
+    const listOf = prefix => this.entries.get(prefix) ?? (this.filtering() ? this.untracked?.get(prefix) : null) ?? [];
     if (this.filtering()) {
       shown = new Set(); matched = new Set(); this.startClosed = new Set();
       const matches = (path, entry) => (!this.query || entry.name.toLowerCase().includes(this.query))
         && (!this.changesOnly || Boolean(entry.dir ? this.folderMarks[path] : this.marks[path]));
       const find = (prefix, depth) => {
         let any = false;
-        for (const entry of this.entries.get(prefix) ?? []) {
+        for (const entry of listOf(prefix)) {
           const path = prefix ? `${prefix}/${entry.name}` : entry.name;
           const self = matches(path, entry), below = entry.dir && depth < 40 && find(path, depth + 1);
           if (self) matched.add(path);
@@ -727,7 +763,7 @@ export default class Explorer extends View {
     const rows = [], walk = (prefix, depth, inside) => {
       // A new file or folder is named in a row at the top of its folder, as in VS Code.
       if (this.edit?.kind === "new" && this.edit.parent === prefix) rows.push({ path: `${prefix}${NEW_ROW}`, entry: { name: "", dir: this.edit.dir }, depth, parent: prefix, editing: true });
-      for (const entry of this.entries.get(prefix) ?? []) {
+      for (const entry of listOf(prefix)) {
         if (rows.length >= TOTAL || depth > 40) return;
         const path = prefix ? `${prefix}/${entry.name}` : entry.name;
         if (shown && !inside && !shown.has(path)) continue;
