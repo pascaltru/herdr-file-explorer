@@ -1237,7 +1237,10 @@ export default class Explorer extends View {
         });
         cx.notify();
         await this.applyJump(rel, cx);
-      } catch { if (this.views.get(rel) === view) view.message = "Can't preview this file: it's over 1 MB or unreadable"; }
+      } catch (e) {
+        // Herdr's readTextFile refuses files over 1 MiB rather than cutting them short.
+        if (this.views.get(rel) === view) view.message = /exceeds 1 MiB/.test(String(e)) ? "This file is over 1 MB: too large to open here" : "Can't read this file";
+      }
       finally { cx.notify(); }
     });
     return view;

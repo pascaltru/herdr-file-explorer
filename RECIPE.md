@@ -277,6 +277,8 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   id for another layout. `ctrl-e` takes end-of-line from terminal programs.
 - **Limits:**
   - 500 entries per folder; 200,000 paths from git.
+  - Files over 1 MiB don't open: Herdr's `readTextFile` refuses them (it doesn't cut them short), and
+    the tab says so.
   - Remote spaces can't be watched (polling instead), can't preview images, and offer only the
     read-only actions.
   - Unsaved edits live in the explorer: quitting Herdr or reloading the mod loses them (mods get no
