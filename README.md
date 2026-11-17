@@ -45,9 +45,11 @@ with find in file, search in folder and Quick Open.
 **Searching**
 
 - **Search in folder:** `ctrl+shift+f` (from the explorer), or right-click a folder → Find in Folder…, or
-  the Search tab at the bottom of the panel (next to Explorer). Enter searches (git grep: tracked and
-  untracked files, not ignored ones). Results are grouped by file; a click opens the file at the match,
-  a double click keeps its tab. Repositories only.
+  the Search tab at the bottom of the panel (next to Explorer). It searches as you type, or on Enter
+  (git grep: tracked and untracked files, not ignored ones), with Match case, Match whole word and
+  Regular expression toggles; the `…` button adds files to include and exclude (globs such as
+  `*.ts, src/`). Results are grouped by file; a click opens the file at the match, a double click
+  keeps its tab. Repositories only.
 - **Quick Open** (`ctrl-e`): find a file of the repository by name with fuzzy matching; before typing,
   the recently opened files. Enter opens it in the panel and reveals it in the tree.
 

@@ -319,7 +319,7 @@ export default class Explorer extends View {
     this.folderSearch = saved?.folderSearch ?? null; this.panelView = saved?.panelView ?? "files";
     // Unsaved edits of tabs whose editor was let go (see release).
     this.drafts = saved?.drafts ?? new Map();
-    this.finder?.input.set_value(this.folderSearch?.text ?? "");
+    this.finder?.load(this.folderSearch);
     this.views = new Map(); this.changed = new Set(); this.flushing = false; this.error = null; this.cut = new Set(); this.gitLimited = false;
     this.version++;
   }
@@ -1080,8 +1080,8 @@ export default class Explorer extends View {
 
   // Clear: the Search tab goes dim again, and the view stays, empty, for a new query.
   closeSearch(cx) {
-    this.folderSearch = newSearch();
-    this.finder.input.set_value("");
+    this.folderSearch = newSearch("", this.folderSearch);
+    this.finder.load(this.folderSearch);
     this.finder.focusInput();
     cx.notify();
   }

@@ -133,14 +133,27 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
 - **Search in folder** (as Zed's project search):
   - `ctrl+shift+f` from anywhere in the explorer, or right-click a folder or empty space → Find in
     Folder… (scoped to that folder; works on another machine's space too).
-  - The panel's Search view, under its header: the box with a match-case toggle (`Aa`), a removable
+  - The panel's Search view, under its header: the box with three toggles inside, as VS Code's (Match
+    case `Aa`, Match whole word and Use regular expression, Lucide `whole-word` and `regex`), and a `…`
+    button beside it that shows two more boxes, files to include and files to exclude. Then a removable
     scope chip (`in mods/file-explorer ×`), a summary ("4 results in 3 files", or "Showing the first
-    2,000 of 3,867 results, in 1,364 files") and Clear, which empties the view.
-  - Enter runs `git --literal-pathspecs grep -n -I --null --untracked -F [-i] -e <query> -- [scope]`:
-    plain text, tracked and untracked files, not ignored ones. Results stay until the next run.
+    2,000 of 3,867 results, in 1,364 files") and Clear, which empties the view but keeps the toggles
+    and the file boxes.
+  - It runs `git grep -n -I --null --untracked [-i] [-w] -F|-P -e <query> -- <pathspecs>`: tracked and
+    untracked files, not ignored ones. Enter runs it, and so does a pause of 300 ms in typing (2
+    characters or more), a toggle, or an edit of a file box once a search has run. `exec` can't be
+    stopped: a search asked for while one runs waits for it, and only the latest then runs. Results
+    stay until the next run.
+  - Regular expressions are PCRE (`-P`), or POSIX extended (`-E`) when git is built without PCRE. One
+    JavaScript can't compile shows "Invalid regular expression" without running git. Whole word is
+    git's `-w` (no letter, digit or `_` just before or after).
+  - The file boxes take comma-separated globs read as VS Code does: `*.ts` or `docs` (no slash) at any
+    depth, `src/lib` from the folder's top; each matches a file, or a folder and all it holds. They
+    become `:(glob)` and `:(glob,exclude)` pathspecs, the includes under the scope; without includes
+    the scope is `:(literal)` (a folder named with `[ * ?` or a leading `:` is just a name).
   - Results grouped by file: a header (chevron to fold, icon, name, folder, count), then each line with
     its number and the matches on the `selection` color, in the editor font, cut to 300 characters
-    around the first match.
+    around the first match. The matches are marked with the same search as a JavaScript regex.
   - A click, or Down from the box then arrows and Enter, opens the file in a preview tab with the
     match selected in the middle of the editor. A double click keeps the tab (the second click
     within 500 ms on the same row: a list's clicks carry no count).

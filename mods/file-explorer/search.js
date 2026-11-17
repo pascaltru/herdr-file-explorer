@@ -1,57 +1,110 @@
 // Search in folder: the explorer panel's Search view, `git grep` results grouped by file. It runs on
-// Enter; results stay until the next run.
+// Enter, or as you type once typing pauses; results stay until the next run.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
 import { exec } from "herdr";
 
-const MAX_RESULTS = 2000, MAX_LINE = 300, ROW = 24;
+const MAX_RESULTS = 2000, MAX_LINE = 300, ROW = 24, TYPING_PAUSE = 300, TYPING_MIN = 2;
 // QuickJS's toLocaleString adds no separators.
 const count = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-// One per folder, kept in the explorer's per-folder snapshot like its tabs.
-export function newSearch(scope = "") {
-  return { text: "", query: "", caseSensitive: false, scope, files: [], total: 0, running: false, error: null,
-    ran: false, folded: new Set(), selected: -1, seq: 0, version: 0 };
+// One per folder, kept in the explorer's per-folder snapshot like its tabs. `from`: the options a
+// cleared search keeps (toggles and file filters), as VS Code's Clear does.
+export function newSearch(scope = "", from = null) {
+  return { text: "", query: "", caseSensitive: from?.caseSensitive ?? false, wholeWord: from?.wholeWord ?? false,
+    regex: from?.regex ?? false, include: from?.include ?? "", exclude: from?.exclude ?? "", details: from?.details ?? false,
+    scope, files: [], total: 0, running: false, queued: false, error: null, ran: false, folded: new Set(), selected: -1, seq: 0, version: 0 };
+}
+
+const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// The search as a JS regex, to mark matches in the lines git returns. Whole word as git's -w: no word
+// character just before or after.
+function matcher(s, query) {
+  const source = s.regex ? query : escapeRegex(query);
+  return new RegExp(s.wholeWord ? `(?<!\\w)(?:${source})(?!\\w)` : source, s.caseSensitive ? "g" : "gi");
+}
+
+// "*.js, src/lib" as VS Code reads it: a pattern without a slash matches at any depth; each one
+// matches a file, or a folder and everything in it. Git's glob pathspecs, under `prefix` (the scope).
+const escapeGlob = s => s.replace(/[*?[\]\\]/g, "\\$&");
+function globs(list, magic, prefix = "") {
+  return list.split(",").map(p => p.trim().replace(/\\/g, "/").replace(/^\.?\/+/, "").replace(/\/+$/, "")).filter(Boolean)
+    .flatMap(p => { const g = prefix + (p.includes("/") ? p : `**/${p}`); return [`:(${magic})${g}`, `:(${magic})${g}/**`]; });
 }
 
 // The text cut to a window around the first match (minified files have megabyte lines), with leading
-// indentation dropped, and the matches inside that window. Only the window is lowercased and searched;
-// the first match is found with a case-insensitive regex instead of lowercasing the whole line.
-function excerpt(text, needle, caseSensitive) {
-  const find = caseSensitive ? needle : needle.toLowerCase();
-  const first = !needle ? -1 : caseSensitive ? text.indexOf(needle)
-    : text.search(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+// indentation dropped, and the matches inside that window.
+function excerpt(text, re) {
+  re.lastIndex = 0;
+  const hit = re.exec(text), first = hit ? hit.index : -1;
   const indent = text.length - text.trimStart().length;
   const from = Math.max(indent, Math.min(Math.max(first, 0), text.length) - 60);
-  const window = text.slice(from, from + MAX_LINE), hay = caseSensitive ? window : window.toLowerCase();
+  const window = text.slice(from, from + MAX_LINE);
   const lead = from > indent ? 1 : 0;
   const shown = (lead ? "…" : "") + window + (from + MAX_LINE < text.length ? "…" : "");
   const marks = [];
-  for (let i = find ? hay.indexOf(find) : -1; i !== -1; i = hay.indexOf(find, i + find.length)) {
-    if (i + find.length <= window.length) marks.push([i + lead, i + lead + find.length]);
+  re.lastIndex = 0;
+  for (let m = re.exec(window); m; m = re.exec(window)) {
+    // An empty match (`^`, `a*`) marks nothing and must not stall.
+    if (!m[0].length) { re.lastIndex++; continue; }
+    marks.push([m.index + lead, m.index + lead + m[0].length]);
   }
-  return { text: shown, marks, col: Math.max(first, 0) + 1 };
+  return { text: shown, marks, col: Math.max(first, 0) + 1, length: hit ? hit[0].length : 0 };
 }
+
+// git's -P needs a git built with PCRE; without it, -E (POSIX extended) is close enough.
+let pcre = true;
 
 export class FolderSearch {
   // `explorer` brings the folder (context), the per-folder state (search), icons and opening files.
   constructor(explorer, cx) {
     this.ex = explorer;
     this.input = InputState.new({ placeholder: "Search in folder" });
-    this.input.on("change", () => { if (this.ex.folderSearch) this.ex.folderSearch.text = this.input.value(); });
+    this.input.on("change", (_e, cx) => {
+      const s = this.ex.folderSearch;
+      if (!s) return;
+      s.text = this.input.value();
+      if (s.text.trim().length >= TYPING_MIN && s.text !== s.query) this.later(cx);
+    });
     this.input.on("submit", (_e, cx) => this.run(cx));
     this.input.on("focus", () => { this.inputFocused = true; });
     this.input.on("blur", () => { this.inputFocused = false; });
     this.inputFocused = false;
+    // Files to include and to exclude (the "…" button): comma-separated globs.
+    this.include = InputState.new({ placeholder: "files to include (e.g. *.ts, src/)" });
+    this.exclude = InputState.new({ placeholder: "files to exclude" });
+    for (const [input, field] of [[this.include, "include"], [this.exclude, "exclude"]]) {
+      input.on("change", (_e, cx) => {
+        const s = this.ex.folderSearch;
+        if (!s || s[field] === input.value()) return;
+        s[field] = input.value();
+        if (s.ran) this.later(cx);
+      });
+      input.on("submit", (_e, cx) => this.run(cx));
+    }
     this.handle = cx.focus_handle();
     this.scroll = VirtualListScrollHandle.new();
     this.cache = null;
   }
 
-  // From an event (Enter, Aa, the scope's ×): its cx is gone once git answers, so the search runs
-  // in a task with its own.
+  // From an event (Enter, a toggle, the scope's ×): its cx is gone once git answers, so the search
+  // runs in a task with its own.
   run(cx) {
     cx.spawn(async cx => { await this.search(cx); });
+  }
+
+  // Typing, or a file filter edited: a search once typing pauses.
+  later(cx) {
+    const s = this.ex.folderSearch, typed = this.typed = (this.typed ?? 0) + 1;
+    cx.timer.after(TYPING_PAUSE, cx => { if (this.typed === typed && this.ex.folderSearch === s) this.run(cx); });
+  }
+
+  // The pathspecs: the scope (literal: a folder named with [ * ? or a leading : is just a name), or
+  // the files to include under it, then the files to exclude.
+  pathspecs(s) {
+    const include = globs(s.include, "glob", s.scope ? `${escapeGlob(s.scope)}/` : "");
+    return [...(include.length ? include : s.scope ? [`:(literal)${s.scope}`] : []), ...globs(s.exclude, "glob,exclude")];
   }
 
   async search(cx) {
@@ -60,17 +113,25 @@ export class FolderSearch {
     s.text = query;
     if (!query.trim()) return;
     if (!context.repo) { s.error = "Search in folder works inside a git repository"; s.version++; cx.notify(); return; }
+    // exec can't be stopped: a search asked for meanwhile waits for this one, then the latest runs.
+    if (s.running) { s.queued = true; return; }
+    let re;
+    try { re = matcher(s, query); }
+    catch { s.error = "Invalid regular expression"; s.ran = true; s.files = []; s.total = 0; s.version++; cx.notify(); return; }
     const seq = ++s.seq;
-    s.running = true; s.error = null; s.query = query; s.version++;
+    s.running = true; s.queued = false; s.error = null; s.query = query; s.version++;
     cx.notify();
-    // --literal-pathspecs: a folder named with [ * ? or a leading : is just a name.
-    const args = ["--no-optional-locks", "--literal-pathspecs", "grep", "-n", "-I", "--null", "--no-color", "--untracked",
-      ...(s.caseSensitive ? [] : ["-i"]), "-F", "-e", query, "--", ...(s.scope ? [s.scope] : [])];
-    let r;
-    try { r = await exec("git", args, { cwd: context.root, on: context.on, timeout: 30000 }); }
-    catch (e) { r = { code: 2, stdout: "", stderr: String(e?.message ?? e) }; }
+    const grep = mode => ["--no-optional-locks", "grep", "-n", "-I", "--null", "--no-color", "--untracked",
+      ...(s.caseSensitive ? [] : ["-i"]), ...(s.wholeWord ? ["-w"] : []), mode, "-e", query, "--", ...this.pathspecs(s)];
+    const git = async mode => {
+      try { return await exec("git", grep(mode), { cwd: context.root, on: context.on, timeout: 30000 }); }
+      catch (e) { return { code: 2, stdout: "", stderr: String(e?.message ?? e) }; }
+    };
+    let r = await git(!s.regex ? "-F" : pcre ? "-P" : "-E");
+    if (s.regex && pcre && r.code === 128 && /pcre/i.test(r.stderr ?? "")) { pcre = false; r = await git("-E"); }
     if (seq !== s.seq || this.ex.folderSearch !== s) return;
     s.running = false; s.ran = true; s.version++;
+    if (s.queued) { s.queued = false; this.run(cx); }
     // git grep: 1 is "no match".
     if (r.code > 1) { s.error = (r.stderr || "git grep failed").trim().split("\n")[0]; s.files = []; s.total = 0; cx.notify(); return; }
     const out = r.stdout ?? "", files = new Map();
@@ -85,7 +146,7 @@ export class FolderSearch {
       if (text.endsWith("\r")) text = text.slice(0, -1);
       let lines = files.get(rel);
       if (!lines) files.set(rel, lines = []);
-      lines.push({ line, ...excerpt(text, query, s.caseSensitive) });
+      lines.push({ line, ...excerpt(text, re) });
     }
     s.files = [...files].map(([rel, lines]) => ({ rel, lines }));
     s.total = total; s.folded = new Set(); s.selected = -1;
@@ -115,7 +176,7 @@ export class FolderSearch {
       return;
     }
     this.ex.open(row.file.rel, keep, cx);
-    this.ex.jumpTo(row.file.rel, row.hit.line, row.hit.col, s.query.length, cx);
+    this.ex.jumpTo(row.file.rel, row.hit.line, row.hit.col, row.hit.length, cx);
   }
 
   // Keys inside the search tab: Down from the box into the results, then arrows and Enter.
@@ -141,6 +202,13 @@ export class FolderSearch {
     cx.notify();
   }
 
+  // The boxes show the folder's search (a space switch, Clear).
+  load(s) {
+    this.input.set_value(s?.text ?? "");
+    this.include.set_value(s?.include ?? "");
+    this.exclude.set_value(s?.exclude ?? "");
+  }
+
   // Ctrl+Shift+F or Find in Folder…: the box gets the keyboard with its text selected.
   focusInput() {
     this.input.focus();
@@ -152,19 +220,35 @@ export class FolderSearch {
   render(t, font) {
     const s = this.ex.folderSearch, rows = this.rows();
     const shownFiles = s.files.length, shown = Math.min(s.total, MAX_RESULTS);
-    const summary = s.running ? "Searching…" : s.error ? s.error : !s.ran ? "Enter searches the folder"
+    const summary = s.running ? "Searching…" : s.error ? s.error : !s.ran ? "Type to search the folder"
       : !s.total ? "No results"
       : s.total > shown ? `Showing the first ${count(shown)} of ${count(s.total)} results, in ${count(shownFiles)} files`
       : `${count(s.total)} result${s.total > 1 ? "s" : ""} in ${count(shownFiles)} file${shownFiles > 1 ? "s" : ""}`;
-    const toggle = h_flex().id("search-case").w(24).h(22).flex_none().items_center().justify_center().rounded(4).cursor_pointer()
-      .text_size(12).text_color(s.caseSensitive ? t.foreground : t.muted).when(s.caseSensitive, el => el.bg(t.selected))
-      .hover(st => st.bg(s.caseSensitive ? t.selected : t.hover)).tooltip("Match case")
-      .on_click((_e, cx) => { s.caseSensitive = !s.caseSensitive; s.version++; if (s.ran) this.run(cx); else cx.notify(); }).child("Aa");
+    // A search toggle re-runs a search already shown, or one being typed.
+    const toggle = (field, tip, label) => h_flex().id(`search-${field}`).w(22).h(22).flex_none().items_center().justify_center().rounded(4)
+      .cursor_pointer().text_size(12).text_color(s[field] ? t.foreground : t.muted).when(s[field], el => el.bg(t.selected))
+      .hover(st => st.bg(s[field] ? t.selected : t.hover)).tooltip(tip)
+      .on_click((_e, cx) => {
+        s[field] = !s[field]; s.version++;
+        if (field !== "details" && (s.ran || this.input.value().trim().length >= TYPING_MIN)) this.run(cx);
+        else cx.notify();
+      })
+      .child(label.endsWith(".svg") ? svg(`${this.ex.modPath}/ui/${label}`).size(14) : label);
+    const filter = (id, input, tip) => h_flex().id(id).h(26).px(6).items_center().rounded(5).border_1().border_color(t.border)
+      .bg(t.background).text_size(12).tooltip(tip).child(Input.new(input).flex_1().min_w(0).h_full().text_color(t.foreground));
     const bar = v_flex().flex_none().px(8).py(6).gap(6).border_b(1).border_color(t.border)
-      .child(h_flex().h(28).px(6).gap(6).items_center().rounded(5).border_1().border_color(this.inputFocused ? t.accent : t.border).bg(t.background)
-        .child(svg(`${this.ex.modPath}/ui/search.svg`).size(13).flex_none().text_color(t.dim))
-        .child(Input.new(this.input).flex_1().min_w(0).h_full().text_color(t.foreground))
-        .child(toggle))
+      .child(h_flex().gap(4).items_center()
+        .child(h_flex().flex_1().min_w(0).h(28).pl(6).pr(3).gap(2).items_center().rounded(5).border_1()
+          .border_color(this.inputFocused ? t.accent : t.border).bg(t.background)
+          .child(svg(`${this.ex.modPath}/ui/search.svg`).size(13).flex_none().text_color(t.dim).mr(4))
+          .child(Input.new(this.input).flex_1().min_w(0).h_full().text_color(t.foreground))
+          .child(toggle("caseSensitive", "Match case", "Aa"))
+          .child(toggle("wholeWord", "Match whole word", "whole-word.svg"))
+          .child(toggle("regex", "Use regular expression", "regex.svg")))
+        .child(toggle("details", "Files to include and exclude", "ellipsis.svg")))
+      .when(s.details, el => el
+        .child(filter("search-include", this.include, "Comma-separated globs, such as *.ts, src/"))
+        .child(filter("search-exclude", this.exclude, "Comma-separated globs, such as *.min.js, dist/")))
       .child(h_flex().gap(8).items_center().text_size(11).text_color(s.error ? t.ansi1 : t.dim)
         .when(Boolean(s.scope), el => el.child(h_flex().id("search-scope").h(20).pl(6).pr(2).gap(4).items_center().rounded(4).bg(t.chrome).text_color(t.muted)
           .child(`in ${s.scope}`)
