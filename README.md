@@ -1,44 +1,58 @@
 # Herdr File Explorer
 
-An IDE-style file explorer for [Herdr](https://herdr.dev): the space's repository as a tree with
-file icons and git colors, and editor tabs beside it, in the right-hand panel.
+An IDE-style file explorer for [Herdr](https://herdr.dev), in the right-hand panel: the space's
+repository as a tree with file icons and git colors, and editor tabs beside it to read and edit files,
+with find in file, search in folder and Quick Open.
+
+![File Explorer](preview.png)
 
 ## Use
 
-- **Tree:** click a folder to open it; click a file for a preview tab, double-click to keep it.
-  Drag a file or folder onto a terminal to type its path there, for example into an agent's prompt.
+**The tree**
+
+- Click a folder to open it; click a file for a preview tab, double-click to keep it.
   Keys: arrows, Home/End, Page Up/Down, Enter, Space, typing jumps to a name, Escape returns to the terminal.
+- **Git:** VS Code's letters and colors (U, A, M, D, C); folders holding changes get a dot; ignored files are dimmed.
 - **Toolbar:** the filter box (funnel) shows only the files and folders whose name contains the text, as in
-  Visual Studio. Pending changes shows only changed files (it combines with the search). Collapse closes
+  Visual Studio. Pending changes shows only changed files (it combines with the filter). Collapse closes
   every folder. In the filter box, Escape clears it and Down or Enter moves into the results. Each
   folder keeps its own filter.
+- **Right-click** a file, a folder or empty space: Open, New File…, New Folder…, Copy Path,
+  Copy Relative Path, Cut and Paste (Ctrl+X / Ctrl+V: moves it; outside a git repository it asks
+  first), Rename… (F2), Delete (Del, to the Recycle Bin or Trash after a confirmation),
+  Reveal in File Explorer, Open in Terminal, Find in Folder…. Names are edited in place, as in VS Code.
+  Ctrl+Z in the tree undoes the last move or rename.
+  Spaces on another machine only offer the read-only actions.
+- **Drag** a file or folder onto a terminal to type its path there, for example into an agent's prompt.
+
+**Files**
+
 - **Editing:** type in an open file; a dot on its tab marks unsaved changes, and `ctrl+s` saves. If
   the file changes on disk meanwhile (an agent), the tab keeps your edits and offers Reload or Keep
   mine; a save never overwrites a change it didn't see. Closing a tab with unsaved changes asks: Save,
   Don't Save or Cancel. Files on another machine are read-only.
-- **Right-click a tab:** Close, Close Others, Close to the Right, Close Saved, Close All, Copy Path,
-  Copy Relative Path. Only Close asks about unsaved changes; the others leave those tabs open.
 - **Right-click in a file:** Cut, Copy, Paste; Copy Reference (to the selected lines, `@path#5-10`,
   to paste in an agent's prompt), Copy Path, Copy Relative Path; Find in File, Go to Line; Save.
+- **Right-click a tab:** Close, Close Others, Close to the Right, Close Saved, Close All, Copy Path,
+  Copy Relative Path. Only Close asks about unsaved changes; the others leave those tabs open.
 - **Go to line:** `ctrl+g` in an open file, then a line number or `line:column` and Enter.
 - **Find in file:** `ctrl+f`, `F3`, or the magnifier above the file. Enter or `F3` goes to the next
   match (Shift: the previous one), and Enter keeps stepping until you click or type in the file;
   Escape closes. Only the current match is highlighted.
+
+**Searching**
+
 - **Search in folder:** `ctrl+shift+f` (from the explorer), or right-click a folder → Find in Folder…, or
   the Search tab at the bottom of the panel (next to Explorer). Enter searches (git grep: tracked and
-  untracked files, not ignored ones). Results are grouped by file; a click opens the file at the match.
-  Repositories only.
-- **Width:** the tree keeps the width you give it (at the panel's edge, or on the line between the
-  editor and the tree); opening a file adds the editor beside it.
-- **Git:** VS Code's letters and colors (U, A, M, D, C); folders holding changes get a dot; ignored files are dimmed.
-- **Right-click** a file, a folder or empty space: Open, New File…, New Folder…, Copy Path,
-  Copy Relative Path, Cut and Paste (Ctrl+X / Ctrl+V: moves it; outside a git repository it asks
-  first), Rename… (F2), Delete (Del, to the Recycle Bin or Trash after a confirmation),
-  Reveal in File Explorer, Open in Terminal. Names are edited in place, as in VS Code. Ctrl+Z in
-  the tree undoes the last move or rename.
-  Spaces on another machine only offer the read-only actions.
+  untracked files, not ignored ones). Results are grouped by file; a click opens the file at the match,
+  a double click keeps its tab. Repositories only.
 - **Quick Open** (`ctrl-e`): find a file of the repository by name with fuzzy matching; before typing,
   the recently opened files. Enter opens it in the panel and reveals it in the tree.
+
+**Look**
+
+- **Width:** the tree keeps the width you give it (at the panel's edge, or on the line between the
+  editor and the tree); opening a file adds the editor beside it.
 - **Syntax colors:** VS Code's Dark Modern and Light Modern palettes, or the Herdr theme's, from the gear menu.
 - **Editor font:** VS Code's default (Consolas 14 on Windows, Menlo 12 on macOS), the terminal's, or any installed
   monospace font, and its size, from the gear menu. `scripts/install.ps1 -EditorFont <vscode|terminal|name> -EditorFontSize <12-16>`
@@ -70,7 +84,7 @@ Needs Herdr 0.1.16 or newer.
 **What it runs:** `git` in the space's repository. On Windows it also runs `powershell` to list folders
 git doesn't describe and for file actions (Recycle Bin, rename, reveal); on macOS and Linux it runs
 `sh`, `mv`, `mkdir`, `open`/`osascript` or `gio`/`xdg-open`. It reads the repository's files to show
-them, and writes only when you create or rename something. No network.
+them, and writes only when you save, create, rename, move or delete something. No network.
 
 ### Icon themes
 

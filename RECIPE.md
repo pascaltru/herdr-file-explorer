@@ -2,15 +2,18 @@
 
 An IDE-style explorer in Herdr's right-hand panel, like VS Code's or Zed's. It shows the active space's
 repository as a tree, with file icons and git colors. Clicking a file opens it in editor
-tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the repository by name.
+tabs beside the tree, with syntax colors, where it can be edited and saved. Find in file, search in
+folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name) come with it.
 
 ![File Explorer](preview.png)
 
 ## What you see
 
-- **Tree column** (the whole panel with no file open, 280px on the right once files are open):
+- **Tree column** (the whole panel with no file open, on the right once files are open, at the width
+  the person gave it):
   - A 36px header: the repository's folder icon and name (semibold), and a gear button (24px, 14px icon)
     on the right.
+  - A toolbar under it: the "Filter in explorer" box, Pending changes and Collapse (see Toolbar).
   - Rows of 24px, 16px per level of indent. Each folder has a chevron (14px, `muted`), and a 1px indent
     guide (`border`) runs through every ancestor level.
   - Each row shows a 16px icon, then the name, and on the right a git letter (11px) for files or a dot
@@ -20,6 +23,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Ignored entries are drawn in `dim`, with their icon at 50% opacity.
   - When a folder lists more than 500 entries, a note at the bottom says "Some folders show only their
     first 500 entries".
+  - At the bottom, the Explorer and Search tabs (see Bottom tabs).
 - **Editor column**, left of the tree, present only while files are open:
   - A 36px tab strip on `chrome`, as tall as the tree's header so their bottom lines meet. Each tab
     has a 14px icon, the name (13px, as the tree), and a 22px close button (Lucide's `x`, 14px; `●`
@@ -137,8 +141,6 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   its toolbar) and Search. The shown one hangs from the panel on `background`: open at the top (the
   strip's top line is drawn in pieces around it), straight `border` sides the strip's full height.
   Search is `dim` until a search has run, and still opens the view.
-- **Width:** with files open, the editor and the tree are an `h_resizable` pair: the line between them
-  drags (200px to 1,200px), and the tree keeps that width as tabs open.
 - **Dragging** a file or folder onto a terminal types its quoted path there, without Enter
   (Herdr's `drag_paths`). Dropping anywhere else does nothing. A row being renamed and a file deleted
   on disk can't be dragged.
@@ -175,7 +177,9 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - Delete moves the entry to the Recycle Bin or Trash, after a confirmation dialog (Enter confirms,
     Escape cancels).
   - The tree changes at once, then checks against the disk.
-- **Panel width:** the tree keeps its width, as in VS Code. The first file adds the editor beside it:
+- **Panel width:** the tree keeps its width, as in VS Code. With files open, the editor and the tree
+  are an `h_resizable` pair: the line between them drags (200px to 1,200px). The first file adds the
+  editor beside it:
   the panel grows by the editor's width (640px at first, then its last width), up to the layout's
   maximum. Closing the last tab shrinks the panel back to the tree's width. A width dragged at the
   panel's edge, with or without files, is what the tree keeps. Each wide period gets a fresh
@@ -205,7 +209,7 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
   - the width it resizes is the nearest node on the path that sits in a row
 - **Files** in `mods/file-explorer/`:
   - `main.js`: tree, editor and gear-menu wiring
-  - `menus.js`: the gear, right-click (tree and editor), delete and unsaved-changes popups
+  - `menus.js`: the gear, right-click (tree, editor and tab), delete, unsaved-changes and move popups
   - `ops.js`: file actions
   - `quickopen.js`: Quick Open
   - `find.js`: go to line, find in file
@@ -297,5 +301,13 @@ tabs beside the tree, with syntax colors. `ctrl-e` finds any file of the reposit
 - `ctrl-e`, then typing `mainjs`, ranks `main.js` first; Enter opens it and selects it in the tree.
 - Right-click → New File…, typing a name, Enter: the file appears at once, in sort order. F2 renames.
   Del asks first, then moves the file to the Recycle Bin or Trash.
+- Ctrl+X on a file, then Ctrl+V on a folder, moves it there (in a repository without asking); Ctrl+Z
+  moves it back.
+- Typing in an open file shows `●` on its tab; `ctrl+s` saves and clears it. Changing the file from a
+  terminal while it has unsaved edits shows the "changed on disk" bar instead of reloading.
+- `ctrl+f`, a word, Enter: the next match is selected in the middle of the editor, and "n of m" counts.
+  `ctrl+g`, a line number, Enter: the cursor goes there.
+- `ctrl+shift+f`, a word, Enter: the Search view lists the matches by file; clicking one opens the file
+  at it.
 - The gear menu switches icon theme, syntax colors, font and size live, without closing open tabs.
 - Hiding the panel stops all refreshes; showing it again catches up.

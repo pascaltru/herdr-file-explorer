@@ -8,7 +8,7 @@ behavior changes.
 ## Layout of the code
 
 - `mods/file-explorer/main.js` — the Explorer view: tree, git colors, folder watching, editor tabs.
-- `menus.js` — gear menu, right-click menus (tree, editor), delete and unsaved-changes dialogs (this
+- `menus.js` — gear menu, right-click menus (tree, editor, tabs), delete, unsaved-changes and move dialogs (this
   mod as an overlay, `props().menu`); they reach the explorer through a shared request (`Explorer.handleRequest`).
 - `ops.js` — file operations (PowerShell on Windows, usual tools elsewhere); `quickopen.js` — Quick Open;
   `find.js` — go to line, find in file; `search.js` — search in folder (the panel's Search view);
