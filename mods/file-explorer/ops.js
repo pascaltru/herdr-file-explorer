@@ -73,6 +73,15 @@ export async function trash(path, dir) {
   }
 }
 
+// Web and mail links only: anything else could start a program.
+export async function openExternal(url) {
+  if (!/^(https?|mailto):/i.test(url)) return;
+  const p = platform();
+  // An argument list, never a shell: the URL can't be read as a command.
+  if (p === "windows") await run("rundll32", ["url.dll,FileProtocolHandler", url]);
+  else await run(p === "macos" ? "open" : "xdg-open", [url]);
+}
+
 export async function reveal(path) {
   const p = platform();
   // explorer.exe wants /select,"path" as one argument, quotes included.

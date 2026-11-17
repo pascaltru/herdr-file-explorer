@@ -108,6 +108,15 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   - Herdr's editor binds Ctrl+F to a search panel it never shows, and keeps the key. The explorer binds
     it again with `cx.bind_keys`, for `ExplorerEditor > Input` (its editor area declares that
     `key_context`), to an `explorer-find` action: a later binding for the same context wins.
+- **Markdown preview:** a `.md` or `.markdown` tab has an eye button (Lucide `eye`, "Open Preview")
+  left of the magnifier. It shows the text rendered by Herdr (`TextView.markdown`, selectable and
+  scrollable, 24px side margins), unsaved edits included; the button turns to `code` ("Show Source")
+  to go back. The choice belongs to the tab and survives a space switch.
+  - Links: a relative link or a `file://` link inside the folder opens that file in a preview tab,
+    rendered if it's Markdown too (`#anchors` are dropped). `http`, `https` and `mailto` open in the
+    browser; anything else, and links leading outside the folder, do nothing.
+  - Find, Go to line and a search result's jump switch the tab back to its text first.
+  - Relative images don't show: GPUI loads images only from under the app folder.
 - **Toolbar** (under the header, as in Visual Studio's Solution Explorer):
   - Filter in explorer (funnel icon): keeps the files and folders whose name contains the text
     (case-insensitive, not fuzzy), with the folders leading to them, open. A folder matching only by
@@ -217,7 +226,7 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   - `place.js`: layout lookups
   - `icon-themes/`: Seti and Material, VS Code icon-theme JSON plus SVGs, and VS Code's
     extension-to-language table
-  - `ui/`: chevrons, the gear and the toolbar icons, from Lucide
+  - `ui/`: chevrons, the gear, the toolbar and path-row icons, from Lucide
   - `config.json`: install defaults
 - **Popups:** the same mod opened with `openOverlay`, where `props().menu` picks the popup. With no menu
   and an `overlay` (from `mod.open`, using `mod.json`'s `overlay` spec), it opens as Quick Open. Popups
@@ -235,6 +244,8 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
     `Rename-Item`, `Move-Item`, Recycle Bin through `Microsoft.VisualBasic`, and `explorer /select`
   - on macOS and Linux, `sh` lists folders; `mkdir`/`mv`, `osascript`/`open` or `gio`/`xdg-open`
     perform file actions
+  - to open a web link from a Markdown preview: `rundll32 url.dll,FileProtocolHandler`, `open`
+    or `xdg-open`, with the URL as an argument (no shell)
   - no network
 - **Syntax:** Herdr's editor names twelve colors (keyword, string, comment, function, type, number,
   constant, variable, operator, punctuation, boolean, string.escape). Languages it lacks are shown
@@ -307,6 +318,7 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   moves it back.
 - Typing in an open file shows `●` on its tab; `ctrl+s` saves and clears it. Changing the file from a
   terminal while it has unsaved edits shows the "changed on disk" bar instead of reloading.
+- Opening `README.md` and clicking the eye shows it rendered; a relative link in it opens that file.
 - `ctrl+f`, a word, Enter: the next match is selected in the middle of the editor, and "n of m" counts.
   `ctrl+g`, a line number, Enter: the cursor goes there.
 - `ctrl+shift+f`, a word, Enter: the Search view lists the matches by file; clicking one opens the file

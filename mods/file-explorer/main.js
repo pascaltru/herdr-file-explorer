@@ -1,7 +1,7 @@
 // An IDE-style explorer for the space's repository: editor tabs on the left, the file tree on the right.
 // Derived from the Herdr app's `files` mod (Apache-2.0, see LICENSE-Herdr.txt) and modified; see NOTICE.
 import { View, div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, Input, InputState, h_resizable, resizable_panel } from "gpui-base";
+import { v_flex, h_flex, Editor, EditorState, Input, InputState, h_resizable, resizable_panel, TextView } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, fonts, window, run, appHome, nextCommand, openOverlay, shared, setShared, props, notify, checking } from "herdr";
 import * as fs from "fs/promises";
 import { NAME, REQUEST, renderSettings, renderContext, renderDelete, renderUnsaved, renderEditorContext, contextItems, contextHeight, openDeleteDialog, openUnsavedDialog, openEditorMenu, editorMenuClosed, openMoveDialog, renderMove, openTabMenu, renderTabContext } from "./menus.js";
@@ -95,6 +95,7 @@ const LANG = {
 // Files known by their name rather than an extension.
 const LANG_BY_NAME = { dockerfile: "sh", containerfile: "sh", ".env": "sh" };
 const IMAGES = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]);
+const MARKDOWN = new Set(["md", "markdown"]);
 
 // Mod panes have no folder, so the tree stays on the space's last focused terminal.
 const lastTerminal = new Map();
@@ -879,6 +880,7 @@ export default class Explorer extends View {
   // Selects `length` characters at a 1-based line and column of a file tab, and gives the editor the
   // keyboard: only then is a selection drawn.
   jumpTo(rel, line, col, length, cx) {
+    this.showSource(rel);
     this.pendingJump = { rel, line, col, length };
     cx.spawn(async cx => { await this.applyJump(rel, cx); });
   }
@@ -942,6 +944,7 @@ export default class Explorer extends View {
   showGoTo(cx) {
     const code = this.activeCode();
     if (!code) return false;
+    this.showSource(this.active);
     this.findBar.forget();
     this.goto.show(code, cx);
     return true;
@@ -950,8 +953,42 @@ export default class Explorer extends View {
   // F3, Ctrl+F or the magnifier.
   showFind(cx) {
     if (!this.activeCode()) return false;
+    this.showSource(this.active);
     this.goto.open = false;
     return this.findBar.show(cx);
+  }
+
+  // A Markdown tab shown rendered (see editor) goes back to its text: finding and jumping need the editor.
+  showSource(rel) {
+    const tab = this.tabs.find(t => t.rel === rel);
+    if (tab) tab.rendered = false;
+  }
+
+  // A link clicked in a rendered Markdown file. A file of this folder opens in a tab (rendered, if
+  // it's Markdown too); a web or mail link opens in the browser; anything else does nothing.
+  followLink(url, from, cx) {
+    if (/^(https?|mailto):/i.test(url)) { ops.openExternal(url).catch(e => notify({ title: "Couldn't open the link", body: String(e?.message ?? e), level: "error" })); return; }
+    let path = url.replace(/[?#].*$/, "");
+    try { path = decodeURIComponent(path); } catch {}
+    if (!path) return;
+    let rel;
+    if (/^file:/i.test(path)) {
+      const abs = path.replace(/^file:\/*/i, ""), root = this.context.root.replace(/\\/g, "/").replace(/^\/+/, "");
+      const same = this.windows() ? abs.toLowerCase().startsWith(`${root.toLowerCase()}/`) : abs.startsWith(`${root}/`);
+      if (!same) return;
+      rel = abs.slice(root.length + 1);
+    } else if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("/")) return;
+    else {
+      const parts = from.split("/").slice(0, -1);
+      for (const part of path.split("/")) {
+        if (part === "..") { if (!parts.length) return; parts.pop(); }
+        else if (part && part !== ".") parts.push(part);
+      }
+      rel = parts.join("/");
+    }
+    if (!rel) return;
+    this.open(rel, false, cx);
+    if (MARKDOWN.has(extension(rel))) { const tab = this.tabs.find(t => t.rel === rel); if (tab) tab.rendered = true; }
   }
 
   // Quick Open's choice: open the folders down to the file, select it, scroll to it, open it.
@@ -1848,7 +1885,16 @@ export default class Explorer extends View {
         .when(last && Boolean(this.icon(part, false, false, 13, t)), el => el.child(this.icon(part, false, false, 13, t)))
         .child(div().text_color(last ? t.foreground : t.muted).child(part)));
     });
+    const tab = this.tabs.find(x => x.rel === active), markdown = Boolean(view?.code) && MARKDOWN.has(extension(active ?? ""));
+    // A Markdown tab can show the text as Herdr renders it, the live text with unsaved edits included.
+    const rendered = markdown && Boolean(tab?.rendered), source = Boolean(view?.code) && !rendered;
+    const rowButton = (id, tip, icon, click) => div().id(id).w(22).h(22).flex_none().flex().items_center().justify_center().rounded(4)
+      .cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+      .tooltip(tip).on_click((_e, cx) => click(cx)).child(svg(`${MOD}/ui/${icon}.svg`).size(13));
     const body = !view ? div()
+      : rendered ? div().id("explorer-markdown").flex_1().min_h(0).px(24).py(16)
+        .child(TextView.markdown(`markdown-${active}`, view.code.value()).selectable(true).scrollable(true).size_full()
+          .on_link_click((url, cx) => this.followLink(url, active, cx)))
       : view.code ? v_flex().id("explorer-editor-body").flex_1().min_h(0).on_mouse_down("right", (_e, cx) => this.editorMenu(cx))
         .child(Editor.new(view.code).flex_1().min_h(0).line_height(`${editorFont().lineHeight}px`))
       : view.picture ? div().flex_1().min_h(0).p(16).flex().items_center().justify_center().child(image(view.picture).max_w_full().max_h_full())
@@ -1865,11 +1911,12 @@ export default class Explorer extends View {
       .on_size_change(size => { this.editorHeight = size.height / this.zoom(); })
       .child(h_flex().id("explorer-tabs").h(36).flex_none().bg(t.chrome).border_b(1).border_color(t.border).overflow_x_scrollbar().children(tabs))
       .child(h_flex().h(26).flex_none().pl(12).pr(6).gap(6).items_center().text_size(12).overflow_hidden().children(crumbs)
-        .when(Boolean(view?.code), el => el.child(div().flex_1()).child(div().id("explorer-find-open").w(22).h(22).flex_none().flex().items_center()
-          .justify_center().rounded(4).cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .tooltip("Find in file (Ctrl+F)").on_click((_e, cx) => this.showFind(cx)).child(svg(`${MOD}/ui/search.svg`).size(13)))))
-      .when(this.goto.open && Boolean(view?.code), el => el.child(this.goto.render(t)))
-      .when(this.findBar.open && Boolean(view?.code), el => el.child(this.findBar.render(t)))
+        .when(Boolean(view?.code), el => el.child(div().flex_1())
+          .when(markdown, el => el.child(rowButton("explorer-markdown-toggle", rendered ? "Show Source" : "Open Preview", rendered ? "code" : "eye",
+            cx => { tab.rendered = !rendered; if (!rendered) { this.goto.open = false; this.findBar.hide(cx); } cx.notify(); })))
+          .child(rowButton("explorer-find-open", "Find in file (Ctrl+F)", "search", cx => this.showFind(cx)))))
+      .when(this.goto.open && source, el => el.child(this.goto.render(t)))
+      .when(this.findBar.open && source, el => el.child(this.findBar.render(t)))
       .when(Boolean(view?.conflict), el => el.child(this.conflictBar(active, t)))
       .child(body);
   }

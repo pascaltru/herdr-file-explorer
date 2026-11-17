@@ -39,6 +39,8 @@ with find in file, search in folder and Quick Open.
 - **Find in file:** `ctrl+f`, `F3`, or the magnifier above the file. Enter or `F3` goes to the next
   match (Shift: the previous one), and Enter keeps stepping until you click or type in the file;
   Escape closes. Only the current match is highlighted.
+- **Markdown preview:** the eye above a `.md` file shows it rendered (with unsaved edits); the `<>`
+  button goes back to the text. Links to files of the folder open in tabs, web links in the browser.
 
 **Searching**
 
@@ -83,7 +85,8 @@ Needs Herdr 0.1.16 or newer.
 
 **What it runs:** `git` in the space's repository. On Windows it also runs `powershell` to list folders
 git doesn't describe and for file actions (Recycle Bin, rename, reveal); on macOS and Linux it runs
-`sh`, `mv`, `mkdir`, `open`/`osascript` or `gio`/`xdg-open`. It reads the repository's files to show
+`sh`, `mv`, `mkdir`, `open`/`osascript` or `gio`/`xdg-open`. A web link clicked in a Markdown preview opens
+in the browser (`rundll32 url.dll`, `open` or `xdg-open`). It reads the repository's files to show
 them, and writes only when you save, create, rename, move or delete something. No network.
 
 ### Icon themes
