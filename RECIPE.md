@@ -117,9 +117,10 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   - **Replace** (editable files): a chevron at the bar's left, or `ctrl+h` (bound like Ctrl+F, as
     `explorer-replace`), shows a second row: a Replace box, then Replace and Replace All buttons.
     `ctrl+h` with a query already there puts the keyboard in the Replace box.
-    - Replace (Enter in the box) selects the current match and types the replacement over it with
+    - Replace (Enter in the box) types the replacement over the match shown, with
       `EditorState.replace` (one undo step), then shows the next match after it; the keyboard stays
-      in the box. Stepping's Enter binding is switched off while the box has the keyboard.
+      in the box. If no match is selected (a click or an edit moved on), it first only shows the
+      next match from the cursor, as VS Code does. Stepping's Enter binding is switched off while the box has the keyboard.
     - Replace All (`ctrl+alt+enter` in the box) replaces every match, past the 10,000 shown, in one
       edit: the stretch from the first match to the last is typed over, so one `ctrl+z` undoes it.
       The cursor goes to the first one.

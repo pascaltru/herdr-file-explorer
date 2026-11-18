@@ -250,15 +250,23 @@ export class FindBar {
     return m && m.index === start ? expand(template, m) : template;
   }
 
-  // Enter in the replace box: the current match is replaced (typed over: Ctrl+Z undoes it), and the
-  // next one is shown. The keyboard stays in the box.
+  // Enter in the replace box: the match shown (selected) is replaced (typed over: Ctrl+Z undoes it),
+  // and the next one is shown. With no match selected (a click or an edit moved on), it first shows
+  // the next one from the cursor, as VS Code does. The keyboard stays in the box.
   replaceOne(cx) {
     const code = this.explorer.activeCode();
     if (!code || !this.explorer.activeEditable()) return;
     this.find();
     if (!this.matches.length) { cx.notify(); return; }
-    const i = this.index >= 0 && this.index < this.matches.length ? this.index : this.firstFrom(code.selected_range().start);
-    const [start, end] = this.matches[i], text = code.value(), value = this.replacement(text, start);
+    const sel = code.selected_range(), shown = this.matches[this.index];
+    // While a jump is still centering, the selection is elsewhere for a few frames.
+    const current = shown && (this.explorer.revealing || (shown[0] === sel.start && shown[1] === sel.end));
+    if (!current) {
+      this.index = this.firstFrom(sel.start);
+      this.explorer.showRange(code, this.matches[this.index][0], this.matches[this.index][1], false, cx);
+      return;
+    }
+    const [start, end] = shown, text = code.value(), value = this.replacement(text, start);
     code.set_selected_range({ start, end });
     code.replace(value);
     this.find();
