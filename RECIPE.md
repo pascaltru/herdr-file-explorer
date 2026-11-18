@@ -106,8 +106,10 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   the box's border red), ↑ ↓ and `×`. A one-line selection fills the box (escaped while the regex
   toggle is on). Regular expressions are JavaScript's, with `^` and `$` at each line; whole word means
   no letter, digit or `_` just before or after.
-  - Typing scrolls to the first match from the cursor (not highlighted yet: Herdr's editor draws a
-    selection only while it has the keyboard). Enter or `F3` goes to the next match, Shift with either
+  - Typing puts the first match from the cursor in the middle of the editor, as Enter does (not
+    highlighted yet: Herdr's editor draws a selection only while it has the keyboard, and it has no
+    other way to mark text). Each letter searches again from where finding started (the cursor, or
+    the last match stepped to), not from the match the previous letter found. Enter or `F3` goes to the next match, Shift with either
     to the previous one: the match is selected in the middle of the editor, which gets the keyboard so
     it shows. From the editor, Enter keeps stepping until a click or an edit in the text (see
     Editing). In a read-only file, letters and Backspace edit the query and bring the keyboard back

@@ -134,6 +134,7 @@ export class FindBar {
     this.replacing = replace;
     this.find();
     this.index = this.firstFrom(range.start);
+    this.origin = range.start; this.placed = null;
     // Ctrl+H with a query already there: straight to the replacement.
     const box = replace && this.input.value() ? () => this.focusReplace() : () => this.focusInput();
     box();
@@ -214,10 +215,17 @@ export class FindBar {
     if (!code) return;
     this.replaced = null;
     this.find();
-    this.index = this.firstFrom(code.selected_range().start);
+    // Each letter searches again from where finding started (the cursor, or the last match stepped
+    // to), not from the match the previous letter found. A selection that isn't ours means the
+    // cursor moved meanwhile (a click): from there.
+    const sel = code.selected_range(), placed = this.placed;
+    const ours = this.explorer.revealing || (placed && sel.start === placed[0] && sel.end === placed[1]);
+    if (!ours || this.origin == null) this.origin = sel.start;
+    this.index = this.firstFrom(this.origin);
     if (this.index !== -1) {
-      const [start, end] = this.matches[this.index];
-      code.set_selected_range({ start, end });
+      // In the middle of the editor, as Enter does (not drawn yet: the box has the keyboard).
+      this.placed = this.matches[this.index];
+      this.explorer.showRange(code, this.placed[0], this.placed[1], false, cx);
     }
     cx.notify();
   }
@@ -244,6 +252,7 @@ export class FindBar {
       if (i === -1) i = n - 1;
     }
     this.index = i;
+    this.placed = this.matches[i]; this.origin = this.placed[0];
     this.stepping = focus; this.replaceStepping = false;
     this.explorer.showRange(code, this.matches[i][0], this.matches[i][1], focus, cx);
   }
@@ -290,6 +299,7 @@ export class FindBar {
   // The match to replace next, selected and drawn: the editor takes the keyboard, and Enter replaces it.
   showForReplace(code, cx) {
     this.stepping = false; this.replaceStepping = true;
+    this.placed = this.matches[this.index]; this.origin = this.placed[0];
     this.explorer.showRange(code, this.matches[this.index][0], this.matches[this.index][1], true, cx);
   }
 
