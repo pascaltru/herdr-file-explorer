@@ -603,6 +603,8 @@ export default class Explorer extends View {
       const parts = path.split("/");
       let parent = "";
       parts.forEach((name, i) => {
+        // A nested repository comes as "sub/repo/": the folder, with nothing inside.
+        if (!name) return;
         if (this.isLazy(parent)) {
           const names = tree.get(parent) ?? tree.set(parent, new Map()).get(parent);
           names.set(name, i < parts.length - 1 || names.get(name) === true);
