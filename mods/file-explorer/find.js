@@ -150,7 +150,7 @@ export class FindBar {
 
   // Closed: the file's text and editor aren't kept (up to 1 MB, and a released editor).
   forget() {
-    this.open = false; this.stepping = false; this.replaceStepping = false; this.source = null; this.matches = []; this.index = -1;
+    this.open = false; this.stepping = false; this.replaceStepping = false; this.beforeAll = null; this.source = null; this.matches = []; this.index = -1;
   }
 
   focusInput() {
@@ -293,8 +293,9 @@ export class FindBar {
     this.explorer.showRange(code, this.matches[this.index][0], this.matches[this.index][1], true, cx);
   }
 
-  // Every match, each typed over on its own as Replace does: Ctrl+Z undoes them one at a time, the
-  // last first, as it would typing. The replacements are worked out from the text before any edit.
+  // Every match at once, in one edit, as VS Code: Herdr's editor can't group several edits into one
+  // undo step, so the stretch from the first match to the last is typed over, and one Ctrl+Z undoes
+  // it all. That undo selects the whole stretch; undoneAll turns it into a cursor at the first match.
   replaceAll(cx) {
     const code = this.explorer.activeCode();
     if (!code || !this.explorer.activeEditable()) return;
@@ -302,20 +303,27 @@ export class FindBar {
     let matches;
     try { matches = this.all(text, query, null, Infinity); } catch { return; }
     if (!matches.length) return;
+    const from = matches[0][0], to = matches[matches.length - 1][1];
     const re = this.regex ? this.pattern(query) : null;
-    const values = matches.map(([start]) => this.replacement(text, start, re));
-    // Each edit moves the matches after it by the difference in length.
-    let shift = 0;
-    matches.forEach(([start, end], i) => {
-      code.set_selected_range({ start: start + shift, end: end + shift });
-      code.replace(values[i]);
-      shift += values[i].length - (end - start);
-    });
-    code.set_selected_range({ start: matches[0][0], end: matches[0][0] });
+    let out = "", at = from;
+    for (const [start, end] of matches) { out += text.slice(at, start) + this.replacement(text, start, re); at = end; }
+    this.beforeAll = { code, text, at: from };
+    code.set_selected_range({ start: from, end: to });
+    code.replace(out);
+    code.set_selected_range({ start: from, end: from });
     this.replaced = matches.length; this.replacedText = code.value();
     this.find();
     this.index = this.firstFrom(matches[0][0]);
     cx.notify();
+  }
+
+  // An edit of the file: if it brought back the text from before Replace All (its Ctrl+Z), the
+  // stretch the undo selected becomes a cursor at the first match, once the editor has set it.
+  undoneAll(code, cx) {
+    const before = this.beforeAll;
+    if (!before || before.code !== code || code.value() !== before.text) return;
+    this.beforeAll = null;
+    cx.timer.after(0, () => code.set_selected_range({ start: before.at, end: before.at }));
   }
 
   // The file was edited (typing, Ctrl+Z after a Replace): count again, once typing pauses. The

@@ -1357,6 +1357,7 @@ export default class Explorer extends View {
           // Replace's own edit keeps its stepping; typing ends it.
           const own = this.findBar.replaceStepping && view.code.value() === this.findBar.ownText;
           if (!own) this.endStepping(cx);
+          this.findBar.undoneAll(view.code, cx);
           this.onEdit(view.rel, view, cx);
         });
         cx.notify();

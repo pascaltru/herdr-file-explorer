@@ -127,11 +127,12 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
       a typed edit (not Replace's own, recognized by the text it left) or either box taking the
       keyboard ends it; letters typed meanwhile go into the file. If no match is selected (a click or
       an edit moved on), Replace first only shows the next match from the cursor, as VS Code does.
-    - Replace All (`ctrl+alt+enter` in the box) replaces every match, past the 10,000 shown, each
-      typed over on its own as Replace does: `ctrl+z` undoes them one at a time, the last first, as
-      it would typing (one edit for them all would have to retype the whole stretch between the first
-      and the last, and its undo would swap that whole stretch back). The replacements come from the
-      text before the first edit. The cursor goes to the first one, and the count says "Replaced 12" until the text changes again.
+    - Replace All (`ctrl+alt+enter` in the box) replaces every match, past the 10,000 shown, in one
+      edit, as VS Code: Herdr's editor can't group several edits into one undo step, so the stretch
+      from the first match to the last is typed over, and one `ctrl+z` undoes it all. That undo
+      selects the whole stretch, which looks as if the text were swapped: when an edit brings back
+      the text from before Replace All, the explorer turns that selection into a cursor at the first
+      match. The cursor goes to the first one, and the count says "Replaced 12" until the text changes again.
     - The count follows edits to the file (typing, `ctrl+z`) once typing pauses (300 ms).
     - With the regex toggle, the replacement takes JavaScript's `$1`, `$&`, `$<name>` and `$$`.
   - Herdr's editor binds Ctrl+F to a search panel it never shows, and keeps the key. The explorer binds
