@@ -169,8 +169,9 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
     characters or more), a toggle, or an edit of a file box once a search has run. `exec` can't be
     stopped: a search asked for while one runs waits for it, and only the latest then runs. Results
     stay until the next run.
-  - Regular expressions are PCRE (`-P`), or POSIX extended (`-E`) when git is built without PCRE. One
-    JavaScript can't compile shows "Invalid regular expression" without running git. Whole word is
+  - Regular expressions are PCRE (`-P`), or POSIX extended (`-E`) when git is built without PCRE. git judges the
+    pattern: an invalid one shows "Invalid regular expression: <git's reason>", and one JavaScript
+    can't compile (PCRE's `(?i)`, `a++`) still searches, its matches unmarked in the results. Whole word is
     git's `-w` (no letter, digit or `_` just before or after).
   - The file boxes take comma-separated globs read as VS Code does: `*.ts` or `docs` (no slash) at any
     depth, `src/lib` from the folder's top; each matches a file, or a folder and all it holds. They

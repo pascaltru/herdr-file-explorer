@@ -36,16 +36,16 @@ function globs(list, magic, prefix = "") {
 // The text cut to a window around the first match (minified files have megabyte lines), with leading
 // indentation dropped, and the matches inside that window.
 function excerpt(text, re) {
-  re.lastIndex = 0;
-  const hit = re.exec(text), first = hit ? hit.index : -1;
+  if (re) re.lastIndex = 0;
+  const hit = re ? re.exec(text) : null, first = hit ? hit.index : -1;
   const indent = text.length - text.trimStart().length;
   const from = Math.max(indent, Math.min(Math.max(first, 0), text.length) - 60);
   const window = text.slice(from, from + MAX_LINE);
   const lead = from > indent ? 1 : 0;
   const shown = (lead ? "…" : "") + window + (from + MAX_LINE < text.length ? "…" : "");
   const marks = [];
-  re.lastIndex = 0;
-  for (let m = re.exec(window); m; m = re.exec(window)) {
+  if (re) re.lastIndex = 0;
+  for (let m = re ? re.exec(window) : null; m; m = re.exec(window)) {
     // An empty match (`^`, `a*`) marks nothing and must not stall.
     if (!m[0].length) { re.lastIndex++; continue; }
     marks.push([m.index + lead, m.index + lead + m[0].length]);
@@ -115,9 +115,10 @@ export class FolderSearch {
     if (!context.repo) { s.error = "Search in folder works inside a git repository"; s.version++; cx.notify(); return; }
     // exec can't be stopped: a search asked for meanwhile waits for this one, then the latest runs.
     if (s.running) { s.queued = true; return; }
-    let re;
-    try { re = matcher(s, query); }
-    catch { s.error = "Invalid regular expression"; s.ran = true; s.files = []; s.total = 0; s.version++; cx.notify(); return; }
+    // git judges the pattern (PCRE takes (?i), a++ and more than JavaScript); one JavaScript can't
+    // compile only goes unmarked in the results.
+    let re = null;
+    try { re = matcher(s, query); } catch {}
     const seq = ++s.seq;
     s.running = true; s.queued = false; s.error = null; s.query = query; s.version++;
     cx.notify();
@@ -135,7 +136,12 @@ export class FolderSearch {
     s.running = false; s.ran = true; s.version++;
     if (s.queued) { s.queued = false; if (this.ex.folderSearch === s) this.run(cx); }
     // git grep: 1 is "no match".
-    if (r.code > 1) { s.error = (r.stderr || "git grep failed").trim().split("\n")[0]; s.files = []; s.total = 0; cx.notify(); return; }
+    if (r.code > 1) {
+      const line = (r.stderr || "git grep failed").trim().split("\n")[0];
+      // "fatal: -e option, '(': missing closing parenthesis"
+      s.error = s.regex && r.code === 128 && /^fatal: -e option/.test(line) ? `Invalid regular expression: ${line.slice(line.lastIndexOf(": ") + 2)}` : line;
+      s.files = []; s.total = 0; cx.notify(); return;
+    }
     const out = r.stdout ?? "", files = new Map();
     let total = 0;
     // Records are path\0line\0text\n; a cut-off last record (output limit) has no newline and is dropped.
