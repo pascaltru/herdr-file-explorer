@@ -41,8 +41,8 @@ with find in file, search in folder and Quick Open.
   Escape closes. Match case, whole word and regular expression toggles sit in the box. Only the
   current match is highlighted.
 - **Replace:** `ctrl+h`, or the chevron at the left of the find bar. Enter replaces the current match
-  and moves to the next; Replace All (`ctrl+alt+enter`) replaces every match in one step and says how many, undone by
-  one `ctrl+z`. Regular expressions take `$1` in the replacement.
+  and moves to the next; Replace All (`ctrl+alt+enter`) replaces every match and says how many.
+  `ctrl+z` undoes the replacements one at a time, as it would typing. Regular expressions take `$1` in the replacement.
 - **Markdown preview:** the eye above a `.md` file shows it rendered (with unsaved edits); the `<>`
   button goes back to the text. Links to files of the folder open in tabs, web links in the browser.
 

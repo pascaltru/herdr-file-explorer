@@ -279,8 +279,8 @@ export class FindBar {
     else cx.notify();
   }
 
-  // Every match at once, in one edit: the stretch from the first match to the last is typed over, so
-  // one Ctrl+Z undoes it all.
+  // Every match, each typed over on its own as Replace does: Ctrl+Z undoes them one at a time, the
+  // last first, as it would typing. The replacements are worked out from the text before any edit.
   replaceAll(cx) {
     const code = this.explorer.activeCode();
     if (!code || !this.explorer.activeEditable()) return;
@@ -288,16 +288,19 @@ export class FindBar {
     let matches;
     try { matches = this.all(text, query, null, Infinity); } catch { return; }
     if (!matches.length) return;
-    const from = matches[0][0], to = matches[matches.length - 1][1];
-    let out = "", at = from;
     const re = this.regex ? this.pattern(query) : null;
-    for (const [start, end] of matches) { out += text.slice(at, start) + this.replacement(text, start, re); at = end; }
-    code.set_selected_range({ start: from, end: to });
-    code.replace(out);
-    code.set_selected_range({ start: from, end: from });
+    const values = matches.map(([start]) => this.replacement(text, start, re));
+    // Each edit moves the matches after it by the difference in length.
+    let shift = 0;
+    matches.forEach(([start, end], i) => {
+      code.set_selected_range({ start: start + shift, end: end + shift });
+      code.replace(values[i]);
+      shift += values[i].length - (end - start);
+    });
+    code.set_selected_range({ start: matches[0][0], end: matches[0][0] });
     this.replaced = matches.length; this.replacedText = code.value();
     this.find();
-    this.index = this.firstFrom(from);
+    this.index = this.firstFrom(matches[0][0]);
     cx.notify();
   }
 

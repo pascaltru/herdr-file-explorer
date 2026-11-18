@@ -125,9 +125,11 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
       keyboard); the count says which it is. If no match is selected (a click or an edit moved on),
       it first only shows the next match from the cursor, as VS Code does. Stepping's Enter binding
       is switched off while the box has the keyboard.
-    - Replace All (`ctrl+alt+enter` in the box) replaces every match, past the 10,000 shown, in one
-      edit: the stretch from the first match to the last is typed over, so one `ctrl+z` undoes it.
-      The cursor goes to the first one, and the count says "Replaced 12" until the text changes again.
+    - Replace All (`ctrl+alt+enter` in the box) replaces every match, past the 10,000 shown, each
+      typed over on its own as Replace does: `ctrl+z` undoes them one at a time, the last first, as
+      it would typing (one edit for them all would have to retype the whole stretch between the first
+      and the last, and its undo would swap that whole stretch back). The replacements come from the
+      text before the first edit. The cursor goes to the first one, and the count says "Replaced 12" until the text changes again.
     - The count follows edits to the file (typing, `ctrl+z`) once typing pauses (300 ms).
     - With the regex toggle, the replacement takes JavaScript's `$1`, `$&`, `$<name>` and `$$`.
   - Herdr's editor binds Ctrl+F to a search panel it never shows, and keeps the key. The explorer binds
