@@ -1346,6 +1346,7 @@ export default class Explorer extends View {
         // The file changed while the edits waited as a draft.
         view.conflict = Boolean(draft) && text !== draft.base;
         view.code.on("change", (_e, cx) => {
+          view.markdown = null;
           if (this.views.get(view.rel) !== view) return;
           this.endStepping(cx);
           this.onEdit(view.rel, view, cx);
@@ -1986,7 +1987,8 @@ export default class Explorer extends View {
       .tooltip(tip).on_click((_e, cx) => click(cx)).child(svg(`${MOD}/ui/${icon}.svg`).size(13));
     const body = !view ? div()
       : rendered ? div().id("explorer-markdown").flex_1().min_h(0).px(24).py(16)
-        .child(TextView.markdown(`markdown-${active}`, view.code.value()).selectable(true).scrollable(true).size_full()
+        // The text is read once per edit, not on every repaint of the window.
+        .child(TextView.markdown(`markdown-${active}`, view.markdown ??= view.code.value()).selectable(true).scrollable(true).size_full()
           .on_link_click((url, cx) => this.followLink(url, active, cx)))
       : view.code ? v_flex().id("explorer-editor-body").flex_1().min_h(0).on_mouse_down("right", (_e, cx) => this.editorMenu(cx))
         .child(Editor.new(view.code).flex_1().min_h(0).line_height(`${editorFont().lineHeight}px`))
