@@ -290,11 +290,13 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   - functions: `spaces`, `panes`, `focused`, `layout`, `exec`, `readTextFile`, `writeTextFile`,
     `watchFolder`, `theme`, `settings`, `fonts`, `window`, `openOverlay`, `closeOverlay`, `shared`,
     `setShared`, `props`, `nextCommand`, and `fs/promises` (for its own files)
+  - elements: `EditorState`/`Editor` for files, `TextView.markdown` for the Markdown preview
   - commands: `layout.resize`, `layout.select`, `layout.show`, `pane.focus`, `terminal.open`
   - shared state: `file-explorer.iconTheme`, `.syntax`, `.font`, `.fontSize`, `.recent`, `.request`
 - **Programs:**
   - `git`: `rev-parse`, `ls-files -t -c -o --exclude-standard --directory` and `status --porcelain=v1
-    --ignored=matching`, run in parallel; `grep` for search in folder
+    --ignored=matching`, run in parallel; `ls-files -o --exclude-standard` while a filter is on;
+    `grep` for search in folder
   - on Windows, `powershell` lists folders git doesn't describe and performs file actions: `New-Item`,
     `Rename-Item`, `Move-Item`, Recycle Bin through `Microsoft.VisualBasic`, and `explorer /select`
   - on macOS and Linux, `sh` lists folders; `mkdir`/`mv`, `osascript`/`open` or `gio`/`xdg-open`
@@ -309,7 +311,7 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
 - **Art:**
   - Seti icons: VS Code's Seti font glyphs converted to SVG (MIT)
   - Material Icon Theme SVGs (MIT)
-  - Lucide chevrons, gear and toolbar icons (ISC)
+  - Lucide chevrons, gear, toolbar, path-row and search-toggle icons (ISC)
   - `scripts/build-icon-themes.py` regenerates the themes from upstream at pinned versions
 
 ## Watch out
@@ -337,6 +339,11 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   - Changes under `.git` (commits, staging) must still refresh the git colors.
   - Run PowerShell with `$ErrorActionPreference = 'Stop'`, or a failed .NET call exits 0.
   - Quote names for PowerShell with `-LiteralPath` and doubled apostrophes, including the curly ones.
+- **Herdr's editor:**
+  - It draws its selection only while it has the keyboard, and nothing else can mark text: find
+    can't highlight while its box has the keyboard, and only one match at a time.
+  - `replace(text)` is one undo step and edits can't be grouped: Replace All types over one stretch.
+  - `set_value` fires no `change` event; `replace` does, after it returns.
 - **Install:** Herdr docks a new mod folder into the shown layout unless its `mod.json`
   (`"place": "none"`) arrives first. Copy `mod.json` before the rest.
 - **Keys:** `ctrl-shift-e` replaces Herdr's split-down binding and toggles the node `panel`; change the
@@ -378,8 +385,12 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
 - Opening `README.md` and clicking the eye shows it rendered; a relative link in it opens that file.
 - `ctrl+f`, a word, Enter: the next match is selected in the middle of the editor, and "n of m" counts.
   `ctrl+g`, a line number, Enter: the cursor goes there.
-- `ctrl+shift+f`, a word, Enter: the Search view lists the matches by file; clicking one opens the file
-  at it.
+- `ctrl+h` in an editable file, a word and a replacement: Enter replaces the match and shows the next
+  one drawn, Enter again replaces it; Replace All says "Replaced n", and one `ctrl+z` undoes it,
+  leaving a cursor at the first match.
+- `ctrl+shift+f`, a word: the Search view lists the matches by file as typing pauses; clicking one
+  opens the file at it. Whole word, regex (`(?i)` too) and `*.{js,md}` in files to include narrow
+  it.
 - Typing in a file, switching to another space and back: `ctrl+z` still undoes the typing.
 - The gear menu switches icon theme, syntax colors, font and size live, without closing open tabs.
 - Hiding the panel stops all refreshes; showing it again catches up.

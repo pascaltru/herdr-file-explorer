@@ -29,7 +29,8 @@ behavior changes.
 
 - Edit here, then run `powershell -NoProfile -File scripts/install.ps1`. It mirrors
   `mods/file-explorer` into the Herdr home and runs `herdr-app check`. A passing check is required
-  before calling anything done.
+  before calling anything done. Then `herdr-app status` must list no `errors`: the check passes
+  files Herdr then refuses to reload (a NUL byte, for one).
 - See the result with `herdr-app shot <file.png>`, then read the PNG. Never drive the mouse or keyboard
   on the user's display.
 - To exercise clicks or state:
@@ -37,6 +38,10 @@ behavior changes.
     `cx.timer` that writes JSON to `~/.config/herdr-app/cache/explorer-debug.json`).
   - Read that file.
   - Reinstall to remove the hook, and confirm `grep -c TESTHOOK` gives 0.
+  - A hook runs only while the explorer is shown: the test space selected, its panel shown. The user
+    may switch away meanwhile; `space.select` the test space before reading, then switch back.
+  - Simulate typing with `code.replace(text)` (it fires `change`, after the call returns), not
+    `set_value`, which fires none (nor does `InputState.set_value`).
 - Popups: the "focus" command after a popup closes doesn't always come (it doesn't for the editor's
   right-click menu). A popup's copy gets `close()` when it closes, and can ask the explorer from there.
 - A dialog opened by a test (an overlay) survives a reinstall: close it with
@@ -53,7 +58,9 @@ behavior changes.
 - **Python edits on Windows:**
   - Use `read_bytes`/`write_bytes`; `write_text` turns the file into CRLF.
   - Use raw strings when the text has backslashes.
-  - Prefer the Edit tool for JS.
+  - Prefer the Edit tool for JS. A script holding JS with backslashes goes in a file written with the
+    Write tool: Bash heredocs mangle backslashes (one turned `"\0"` into a real NUL byte, another
+    `'\r\n'` into line breaks).
 - Git has `core.autocrlf=true`; CRLF warnings are expected.
 - Comments explain only a non-obvious why, tersely.
 
@@ -93,8 +100,20 @@ behavior changes.
     `cx.bind_keys` with a context (`ExplorerEditor > Input`) out-binds it, because a later binding
     wins. Ctrl+G, F3, Ctrl+Shift+F and Escape do reach `on_key_down` on its parent.
   - Editable, it also keeps Enter, letters and Ctrl+S. A binding can be switched on and off by
-    changing the parent's `key_context` ("ExplorerEditor FindStepping"). It keeps CRLF as read;
-    `set_selected_range` fires no change event.
+    changing the parent's `key_context` ("ExplorerEditor FindStepping", "ReplaceStepping"). It keeps
+    CRLF as read; `set_selected_range` fires no change event.
+  - No API marks text without the keyboard (no decorations, no readable scroll offset): find can't
+    highlight while its box has the keyboard. Routing typed keys from the editor to the box was
+    rejected: unbound keys (accented letters of non-US layouts, dead keys) would type into the file.
+  - `replace(text)` works without the keyboard and is one undo step; several can't be grouped. Its
+    undo selects the whole replaced range (see `undoneAll`).
+  - Kept `EditorState`s outlive space switches (`evictEditors`, 15 at most); a change handler reads
+    `view.rel`, never the name it was created with.
+- **Other Herdr APIs:**
+  - `readTextFile` throws "Text file exceeds 1 MiB" rather than cutting a file short.
+  - `TextView` is in "gpui-base". Its own scrollbar, dragged, selects text: scroll it in a
+    `div().overflow_y_scrollbar()` instead.
+  - An action handler gets only the action's name: one action per bound key.
 - **Syntax:** Herdr's editor bundles few grammars. `LANG`/`LANG_BY_NAME` map other types to a close
   relative (TS→js, ps1/Dockerfile→sh, tf→ruby, kt→java, swift→rust, csproj→xml).
 
@@ -109,3 +128,7 @@ behavior changes.
 - Keys: `ctrl-shift-e` toggles the panel (replacing Herdr's split-down); `ctrl-e` opens Quick Open
   (the user insisted, knowing it takes end-of-line from terminals).
 - No native sidecar for now. If ever needed: a Go binary.
+- Find and Replace show no match while their box has the keyboard (Herdr can't mark text otherwise).
+  The user declined workarounds (a preview strip of the match line, a band drawn over the editor);
+  after Enter or Replace the editor takes the keyboard so the match shows.
+- Replace All is one undo step, as VS Code (tried one edit per match: too many Ctrl+Z).
