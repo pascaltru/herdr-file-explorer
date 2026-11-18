@@ -240,11 +240,11 @@ export class FindBar {
     this.explorer.showRange(code, this.matches[i][0], this.matches[i][1], focus, cx);
   }
 
-  // What replaces the match at `start`: the box's text, with $1 and the like for a regex.
-  replacement(text, start) {
+  // What replaces the match at `start`: the box's text, with $1 and the like for a regex (`re`, made
+  // once by Replace All for all its matches).
+  replacement(text, start, re = this.regex ? this.pattern(this.input.value()) : null) {
     const template = this.replaceInput.value();
-    if (!this.regex) return template;
-    const re = this.pattern(this.input.value());
+    if (!re) return template;
     re.lastIndex = start;
     const m = re.exec(text);
     return m && m.index === start ? expand(template, m) : template;
@@ -287,7 +287,8 @@ export class FindBar {
     if (!matches.length) return;
     const from = matches[0][0], to = matches[matches.length - 1][1];
     let out = "", at = from;
-    for (const [start, end] of matches) { out += text.slice(at, start) + this.replacement(text, start); at = end; }
+    const re = this.regex ? this.pattern(query) : null;
+    for (const [start, end] of matches) { out += text.slice(at, start) + this.replacement(text, start, re); at = end; }
     code.set_selected_range({ start: from, end: to });
     code.replace(out);
     code.set_selected_range({ start: from, end: from });
