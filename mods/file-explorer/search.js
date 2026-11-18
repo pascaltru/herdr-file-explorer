@@ -129,9 +129,11 @@ export class FolderSearch {
     };
     let r = await git(!s.regex ? "-F" : pcre ? "-P" : "-E");
     if (s.regex && pcre && r.code === 128 && /pcre/i.test(r.stderr ?? "")) { pcre = false; r = await git("-E"); }
-    if (seq !== s.seq || this.ex.folderSearch !== s) return;
+    if (seq !== s.seq) return;
+    // The results belong to their folder even if another one is shown now (a space switch): they're
+    // there when it comes back. Only a search asked for meanwhile in this view runs next.
     s.running = false; s.ran = true; s.version++;
-    if (s.queued) { s.queued = false; this.run(cx); }
+    if (s.queued) { s.queued = false; if (this.ex.folderSearch === s) this.run(cx); }
     // git grep: 1 is "no match".
     if (r.code > 1) { s.error = (r.stderr || "git grep failed").trim().split("\n")[0]; s.files = []; s.total = 0; cx.notify(); return; }
     const out = r.stdout ?? "", files = new Map();
