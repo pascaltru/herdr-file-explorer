@@ -1245,7 +1245,8 @@ export default class Explorer extends View {
     }
     view.pending = true;
     const seq = view.editSeq = (view.editSeq ?? 0) + 1;
-    cx.timer.after(300, cx => { if (view.editSeq === seq && this.views.get(rel) === view) this.edited(rel, view, cx); });
+    // view.rel: a rename meanwhile moves the editor to its new name.
+    cx.timer.after(300, cx => { if (view.editSeq === seq && this.views.get(view.rel) === view) this.edited(view.rel, view, cx); });
   }
 
   // Unsaved edits: the text compared with what was read or last saved, line endings as the file has them.
@@ -1735,7 +1736,11 @@ export default class Explorer extends View {
       // new name means another language.
       const view = this.views.get(tab.rel), ext = extension(next);
       const language = LANG_BY_NAME[base(next).toLowerCase()] ?? LANG[ext] ?? (ext || "txt");
-      if (view?.code && view.language === language) { this.views.delete(tab.rel); this.views.set(next, view); view.rel = next; }
+      if (view?.code && view.language === language) {
+        // A view left at the new name (a file deleted on disk with a tab still open) goes first.
+        if (this.views.has(next)) this.drop(next);
+        this.views.delete(tab.rel); this.views.set(next, view); view.rel = next;
+      }
       else this.drop(tab.rel);
       tab.rel = next;
     }
