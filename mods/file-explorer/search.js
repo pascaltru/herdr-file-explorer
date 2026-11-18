@@ -29,8 +29,36 @@ function matcher(s, query) {
 // matches a file, or a folder and everything in it. Git's glob pathspecs, under `prefix` (the scope).
 const escapeGlob = s => s.replace(/[*?[\]\\]/g, "\\$&");
 function globs(list, magic, prefix = "") {
-  return list.split(",").map(p => p.trim().replace(/\\/g, "/").replace(/^\.?\/+/, "").replace(/\/+$/, "")).filter(Boolean)
+  return splitTop(list).flatMap(p => braces(p)).map(p => p.trim().replace(/\\/g, "/").replace(/^\.?\/+/, "").replace(/\/+$/, "")).filter(Boolean)
     .flatMap(p => { const g = prefix + (p.includes("/") ? p : `**/${p}`); return [`:(${magic})${g}`, `:(${magic})${g}/**`]; });
+}
+
+// Commas outside braces: "*.{ts,tsx}, src" is two patterns.
+function splitTop(list) {
+  const out = [];
+  let depth = 0, from = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === "{") depth++;
+    else if (list[i] === "}") depth = Math.max(depth - 1, 0);
+    else if (list[i] === "," && !depth) { out.push(list.slice(from, i)); from = i + 1; }
+  }
+  out.push(list.slice(from));
+  return out;
+}
+
+// Git's glob pathspecs have no braces: "*.{ts,tsx}" becomes "*.ts" and "*.tsx" (nested ones too,
+// up to 64 patterns). An unmatched brace stays as typed.
+function braces(p, budget = { left: 64 }) {
+  const open = p.indexOf("{");
+  if (open === -1) return [p];
+  let depth = 0, close = -1;
+  for (let i = open; i < p.length && close === -1; i++) {
+    if (p[i] === "{") depth++;
+    else if (p[i] === "}" && --depth === 0) close = i;
+  }
+  if (close === -1) return [p];
+  const head = p.slice(0, open), tail = p.slice(close + 1);
+  return splitTop(p.slice(open + 1, close)).flatMap(o => (budget.left-- > 0 ? braces(head + o + tail, budget) : []));
 }
 
 // The text cut to a window around the first match (minified files have megabyte lines), with leading

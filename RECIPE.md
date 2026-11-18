@@ -174,7 +174,8 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
     can't compile (PCRE's `(?i)`, `a++`) still searches, its matches unmarked in the results. Whole word is
     git's `-w` (no letter, digit or `_` just before or after).
   - The file boxes take comma-separated globs read as VS Code does: `*.ts` or `docs` (no slash) at any
-    depth, `src/lib` from the folder's top; each matches a file, or a folder and all it holds. They
+    depth, `src/lib` from the folder's top; each matches a file, or a folder and all it holds. Braces expand
+    (`*.{ts,tsx}` is `*.ts` and `*.tsx`; git's globs have none), commas inside them don't split. They
     become `:(glob)` and `:(glob,exclude)` pathspecs, the includes under the scope; without includes
     the scope is `:(literal)` (a folder named with `[ * ?` or a leading `:` is just a name).
   - Results grouped by file: a header (chevron to fold, icon, name, folder, count), then each line with
