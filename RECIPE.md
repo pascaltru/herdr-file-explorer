@@ -116,22 +116,29 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
     Go to line and find share the place above the file; opening one closes the other.
   - **Replace** (editable files): a chevron at the bar's left, or `ctrl+h` (bound like Ctrl+F, as
     `explorer-replace`), shows a second row: a Replace box, then Replace and Replace All buttons.
-    `ctrl+h` with a query already there puts the keyboard in the Replace box.
+    The bar is two columns, as VS Code's: the find and Replace boxes, one width (up to 340px), then
+    the count, arrows and `×` beside the first and the buttons beside the second. `ctrl+h` with a
+    query already there puts the keyboard in the Replace box; `ctrl+f` shows find alone.
     - Replace (Enter in the box) types the replacement over the match shown, with
-      `EditorState.replace` (one undo step), then shows the next match after it; the keyboard stays
-      in the box. If no match is selected (a click or an edit moved on), it first only shows the
-      next match from the cursor, as VS Code does. Stepping's Enter binding is switched off while the box has the keyboard.
+      `EditorState.replace` (one undo step), then selects the next match after it; the keyboard
+      stays in the box, so that match isn't drawn (the editor draws a selection only while it has the
+      keyboard); the count says which it is. If no match is selected (a click or an edit moved on),
+      it first only shows the next match from the cursor, as VS Code does. Stepping's Enter binding
+      is switched off while the box has the keyboard.
     - Replace All (`ctrl+alt+enter` in the box) replaces every match, past the 10,000 shown, in one
       edit: the stretch from the first match to the last is typed over, so one `ctrl+z` undoes it.
-      The cursor goes to the first one.
+      The cursor goes to the first one, and the count says "Replaced 12" until the text changes again.
+    - The count follows edits to the file (typing, `ctrl+z`) once typing pauses (300 ms).
     - With the regex toggle, the replacement takes JavaScript's `$1`, `$&`, `$<name>` and `$$`.
   - Herdr's editor binds Ctrl+F to a search panel it never shows, and keeps the key. The explorer binds
     it again with `cx.bind_keys`, for `ExplorerEditor > Input` (its editor area declares that
     `key_context`), to an `explorer-find` action: a later binding for the same context wins.
 - **Markdown preview:** a `.md` or `.markdown` tab has an eye button (Lucide `eye`, "Open Preview")
-  left of the magnifier. It shows the text rendered by Herdr (`TextView.markdown`, selectable and
-  scrollable, 24px side margins), unsaved edits included; the button turns to `code` ("Show Source")
-  to go back. The choice belongs to the tab and survives a space switch.
+  left of the magnifier. It shows the text rendered by Herdr (`TextView.markdown`, selectable, 24px
+  side margins) in a container with its own scrollbar (`overflow_y_scrollbar`): TextView's own,
+  dragged, also selects the text it passes over. No find bar there: Herdr's rendered view can't be
+  searched or given a selection, so find switches back to the text. Unsaved edits show in it; the
+  button turns to `code` ("Show Source") to go back. The choice belongs to the tab and survives a space switch.
   - Links: a relative link or a `file://` link inside the folder opens that file in a preview tab,
     rendered if it's Markdown too (`#anchors` are dropped). `http`, `https` and `mailto` open in the
     browser; anything else, and links leading outside the folder, do nothing.

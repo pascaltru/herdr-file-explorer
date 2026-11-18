@@ -1246,7 +1246,12 @@ export default class Explorer extends View {
     view.pending = true;
     const seq = view.editSeq = (view.editSeq ?? 0) + 1;
     // view.rel: a rename meanwhile moves the editor to its new name.
-    cx.timer.after(300, cx => { if (view.editSeq === seq && this.views.get(view.rel) === view) this.edited(view.rel, view, cx); });
+    cx.timer.after(300, cx => {
+      if (view.editSeq !== seq || this.views.get(view.rel) !== view) return;
+      this.edited(view.rel, view, cx);
+      // The find bar's count follows the text (Ctrl+Z after a Replace).
+      if (this.active === view.rel) this.findBar.refresh(cx);
+    });
   }
 
   // Unsaved edits: the text compared with what was read or last saved, line endings as the file has them.
@@ -1986,10 +1991,12 @@ export default class Explorer extends View {
       .cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
       .tooltip(tip).on_click((_e, cx) => click(cx)).child(svg(`${MOD}/ui/${icon}.svg`).size(13));
     const body = !view ? div()
-      : rendered ? div().id("explorer-markdown").flex_1().min_h(0).px(24).py(16)
-        // The text is read once per edit, not on every repaint of the window.
-        .child(TextView.markdown(`markdown-${active}`, view.markdown ??= view.code.value()).selectable(true).scrollable(true).size_full()
-          .on_link_click((url, cx) => this.followLink(url, active, cx)))
+      // The scrollbar is this container's: TextView's own, dragged, also selects the text it passes over.
+      : rendered ? div().id("explorer-markdown").flex_1().min_h(0).overflow_y_scrollbar()
+        .child(div().px(24).py(16)
+          // The text is read once per edit, not on every repaint of the window.
+          .child(TextView.markdown(`markdown-${active}`, view.markdown ??= view.code.value()).selectable(true)
+            .on_link_click((url, cx) => this.followLink(url, active, cx))))
       : view.code ? v_flex().id("explorer-editor-body").flex_1().min_h(0).on_mouse_down("right", (_e, cx) => this.editorMenu(cx))
         .child(Editor.new(view.code).flex_1().min_h(0).line_height(`${editorFont().lineHeight}px`))
       : view.picture ? div().flex_1().min_h(0).p(16).flex().items_center().justify_center().child(image(view.picture).max_w_full().max_h_full())

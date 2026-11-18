@@ -124,8 +124,8 @@ export class FindBar {
     if (!code) return false;
     const range = code.selected_range(), picked = range.end > range.start ? code.value().slice(range.start, range.end) : "";
     if (picked && !picked.includes("\n") && picked.length <= 200) this.input.set_value(this.regex ? escapeRegex(picked) : picked);
-    this.open = true; this.stepping = false;
-    if (replace) this.replacing = true;
+    this.open = true; this.stepping = false; this.replaced = null;
+    this.replacing = replace;
     this.find();
     this.index = this.firstFrom(range.start);
     // Ctrl+H with a query already there: straight to the replacement.
@@ -206,6 +206,7 @@ export class FindBar {
   typed(cx) {
     const code = this.explorer.activeCode();
     if (!code) return;
+    this.replaced = null;
     this.find();
     this.index = this.firstFrom(code.selected_range().start);
     if (this.index !== -1) {
@@ -220,6 +221,7 @@ export class FindBar {
   step(dir, cx, focus = true) {
     const code = this.explorer.activeCode();
     if (!code) return;
+    this.replaced = null;
     this.find();
     const n = this.matches.length;
     if (!n) { cx.notify(); return; }
@@ -258,6 +260,7 @@ export class FindBar {
     if (!code || !this.explorer.activeEditable()) return;
     this.find();
     if (!this.matches.length) { cx.notify(); return; }
+    this.replaced = null;
     const sel = code.selected_range(), shown = this.matches[this.index];
     // While a jump is still centering, the selection is elsewhere for a few frames.
     const current = shown && (this.explorer.revealing || (shown[0] === sel.start && shown[1] === sel.end));
@@ -292,8 +295,23 @@ export class FindBar {
     code.set_selected_range({ start: from, end: to });
     code.replace(out);
     code.set_selected_range({ start: from, end: from });
+    this.replaced = matches.length; this.replacedText = code.value();
     this.find();
     this.index = this.firstFrom(from);
+    cx.notify();
+  }
+
+  // The file was edited (typing, Ctrl+Z after a Replace): count again, once typing pauses. The
+  // current match stays if it's still there, else the next one from the cursor.
+  refresh(cx) {
+    const code = this.explorer.activeCode();
+    if (!this.open || !code) return;
+    const before = this.matches[this.index];
+    // "Replaced 12" stays only as long as the text Replace All left.
+    if (this.replaced != null && code.value() !== this.replacedText) this.replaced = null;
+    this.find();
+    const same = before ? this.matches.findIndex(m => m[0] === before[0] && m[1] === before[1]) : -1;
+    this.index = same !== -1 ? same : this.firstFrom(code.selected_range().start);
     cx.notify();
   }
 
@@ -315,7 +333,8 @@ export class FindBar {
   render(t) {
     const query = this.input.value(), n = this.matches.length, missing = Boolean(query) && !n;
     const editable = this.explorer.activeEditable(), replacing = this.replacing && editable;
-    const count = this.invalid ? "Invalid regex" : !query ? "" : !n ? "No results" : `${this.index + 1} of ${n}${n >= MAX_MATCHES ? "+" : ""}`;
+    const count = this.invalid ? "Invalid regex" : this.replaced != null ? `Replaced ${this.replaced}`
+      : !query ? "" : !n ? "No results" : `${this.index + 1} of ${n}${n >= MAX_MATCHES ? "+" : ""}`;
     const button = (id, child, tip, on, click) => div().id(id).w(24).h(22).flex_none().flex().items_center().justify_center().rounded(4).cursor_pointer()
       .text_size(12).text_color(on ? t.foreground : t.muted).when(on, el => el.bg(t.selected))
       .hover(s => s.bg(on ? t.selected : t.hover).text_color(t.foreground)).tooltip(tip).on_click((_e, cx) => click(cx)).child(child);
@@ -327,18 +346,17 @@ export class FindBar {
     const textButton = (id, label, tip, click) => div().id(id).h(22).px(8).flex_none().flex().items_center().rounded(4).cursor_pointer()
       .border_1().border_color(t.border).text_color(n ? t.foreground : t.dim).hover(s => s.bg(t.hover)).tooltip(tip)
       .on_click((_e, cx) => click(cx)).child(label);
-    const findRow = h_flex().h(34).px(12).gap(6).items_center()
-      .when(editable, el => el.child(button("find-toggle-replace", icon(`chevron-${replacing ? "down" : "right"}`), "Toggle Replace (Ctrl+H)", false, cx => {
-        this.replacing = !replacing;
-        if (this.replacing) this.focusReplace(); else this.focusInput();
-        cx.notify();
-      })))
-      .child(h_flex().flex_1().min_w(0).max_w(340).h(24).pl(6).pr(1).gap(1).items_center().rounded(5).border_1()
-        .border_color(missing || this.invalid ? t.ansi1 : t.accent).bg(t.background)
-        .child(Input.new(this.input).flex_1().min_w(0).h_full().text_color(t.foreground))
-        .child(toggle("caseSensitive", "Aa", "Match case"))
-        .child(toggle("wholeWord", icon("whole-word"), "Match whole word"))
-        .child(toggle("regex", icon("regex"), "Use regular expression")))
+    // Two columns, as VS Code's: the boxes (one width), and what goes with each.
+    const findBox = h_flex().h(24).pl(6).pr(1).gap(1).items_center().rounded(5).border_1()
+      .border_color(missing || this.invalid ? t.ansi1 : t.accent).bg(t.background)
+      .child(Input.new(this.input).flex_1().min_w(0).h_full().text_color(t.foreground))
+      .child(toggle("caseSensitive", "Aa", "Match case"))
+      .child(toggle("wholeWord", icon("whole-word"), "Match whole word"))
+      .child(toggle("regex", icon("regex"), "Use regular expression"));
+    const replaceBox = h_flex().h(24).px(6).items_center().rounded(5).border_1()
+      .border_color(this.replaceFocused ? t.accent : t.border).bg(t.background)
+      .child(Input.new(this.replaceInput).flex_1().min_w(0).h_full().text_color(t.foreground));
+    const findControls = h_flex().h(24).gap(6).items_center()
       .child(div().flex_none().min_w(64).text_color(this.invalid ? t.ansi1 : t.dim).child(count))
       .child(button("find-prev", "↑", "Previous match (Shift+F3)", false, cx => this.step(-1, cx)))
       .child(button("find-next", "↓", "Next match (F3)", false, cx => this.step(1, cx)))
@@ -346,13 +364,16 @@ export class FindBar {
         this.hide(cx);
         this.explorer.activeCode()?.focus();
       }));
-    return v_flex().id("explorer-find").flex_none().border_b(1).border_color(t.border).text_size(12)
-      .child(findRow)
-      .when(replacing, el => el.child(h_flex().h(30).pl(42).pr(12).pb(4).gap(6).items_center()
-        .child(h_flex().flex_1().min_w(0).max_w(340).h(24).px(6).items_center().rounded(5).border_1()
-          .border_color(this.replaceFocused ? t.accent : t.border).bg(t.background)
-          .child(Input.new(this.replaceInput).flex_1().min_w(0).h_full().text_color(t.foreground)))
-        .child(textButton("find-replace", "Replace", "Replace (Enter)", cx => this.replaceOne(cx)))
-        .child(textButton("find-replace-all", "Replace All", "Replace All (Ctrl+Alt+Enter)", cx => this.replaceAll(cx)))));
+    const replaceControls = h_flex().h(24).gap(6).items_center()
+      .child(textButton("find-replace", "Replace", "Replace (Enter)", cx => this.replaceOne(cx)))
+      .child(textButton("find-replace-all", "Replace All", "Replace All (Ctrl+Alt+Enter)", cx => this.replaceAll(cx)));
+    return h_flex().id("explorer-find").flex_none().px(12).py(5).gap(6).items_start().border_b(1).border_color(t.border).text_size(12)
+      .when(editable, el => el.child(button("find-toggle-replace", icon(`chevron-${replacing ? "down" : "right"}`), "Toggle Replace (Ctrl+H)", false, cx => {
+        this.replacing = !replacing;
+        if (this.replacing) this.focusReplace(); else this.focusInput();
+        cx.notify();
+      }).mt(1)))
+      .child(v_flex().flex_1().min_w(0).max_w(340).gap(4).child(findBox).when(replacing, el => el.child(replaceBox)))
+      .child(v_flex().flex_none().gap(4).child(findControls).when(replacing, el => el.child(replaceControls)));
   }
 }
