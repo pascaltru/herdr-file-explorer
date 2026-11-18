@@ -135,7 +135,8 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
   - Links: a relative link or a `file://` link inside the folder opens that file in a preview tab,
     rendered if it's Markdown too (`#anchors` are dropped). `http`, `https` and `mailto` open in the
     browser; anything else, and links leading outside the folder, do nothing.
-  - Find, Go to line and a search result's jump switch the tab back to its text first.
+  - Find, Go to line and a search result's jump switch the tab back to its text first (F3 too). While
+    it's rendered, a find bar left open from another tab is hidden, and Enter and Escape leave it alone.
   - Relative images don't show: GPUI loads images only from under the app folder.
 - **Toolbar** (under the header, as in Visual Studio's Solution Explorer):
   - Filter in explorer (funnel icon): keeps the files and folders whose name contains the text

@@ -859,14 +859,16 @@ export default class Explorer extends View {
     // A read-only file with the find bar open (after Enter): Enter keeps stepping, and typing goes to
     // the box. An editable file keeps its letters and Enter; its stepping Enter is a binding.
     const view = this.active ? this.views.get(this.active) : null;
-    if (fromEditor && this.findBar.open && !this.findBar.boxFocused && view?.code && !view.editable) {
+    // A Markdown tab shown rendered hides the bars and the editor: they act only once it shows its text.
+    const bars = !this.rendered();
+    if (fromEditor && bars && this.findBar.open && !this.findBar.boxFocused && view?.code && !view.editable) {
       if (e.key === "enter" && !m.control && !m.alt) { this.findBar.step(m.shift ? -1 : 1, cx); cx.stop_propagation(); return true; }
       if (this.findBar.typeIntoBox(e, cx)) { cx.stop_propagation(); return true; }
     }
     if (e.key === "g" && m.control && !m.shift && !m.alt && this.showGoTo(cx)) { cx.stop_propagation(); return true; }
     if (e.key === "f" && m.control && m.shift && !m.alt && this.context) { this.openSearch(null, cx); cx.stop_propagation(); return true; }
     if (e.key === "f3" && !m.control && !m.alt) {
-      if (this.findBar.open && this.activeCode()) this.findBar.step(m.shift ? -1 : 1, cx);
+      if (bars && this.findBar.open && this.activeCode()) this.findBar.step(m.shift ? -1 : 1, cx);
       else if (!this.showFind(cx)) return false;
       cx.stop_propagation();
       return true;
@@ -880,7 +882,7 @@ export default class Explorer extends View {
       cx.stop_propagation();
       return true;
     }
-    if (e.key === "escape" && (this.goto.open || this.findBar.open)) {
+    if (e.key === "escape" && bars && (this.goto.open || this.findBar.open)) {
       if (this.goto.open) this.goto.hide(cx); else this.findBar.hide(cx);
       this.activeCode()?.focus();
       cx.stop_propagation();
@@ -1004,6 +1006,11 @@ export default class Explorer extends View {
   }
 
   activeEditable() { return Boolean(this.active && this.views.get(this.active)?.editable); }
+
+  rendered() {
+    const tab = this.tabs.find(t => t.rel === this.active);
+    return Boolean(tab?.rendered && MARKDOWN.has(extension(tab.rel)) && this.views.get(tab.rel)?.code);
+  }
 
   // A Markdown tab shown rendered (see editor) goes back to its text: finding and jumping need the editor.
   showSource(rel) {
