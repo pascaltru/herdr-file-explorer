@@ -284,6 +284,7 @@ export default class Explorer extends View {
       { keystroke: "f2", action: "explorer-rename", context: "ExplorerTree" },
       { keystroke: "enter", action: "explorer-find-next", context: "FindStepping > Input" },
       { keystroke: "shift-enter", action: "explorer-find-previous", context: "FindStepping > Input" },
+      { keystroke: "enter", action: "explorer-replace-next", context: "ReplaceStepping > Input" },
     ]);
     this.modPath = MOD; this.finder = new FolderSearch(this, cx);
     // Remote spaces can't be watched, and a failed watch falls back to polling.
@@ -984,8 +985,8 @@ export default class Explorer extends View {
   // Find's stepping ends with a click or an edit in the text. The Enter binding follows the editor
   // area's key context, which only a render applies: repaint, or Enter would still step.
   endStepping(cx) {
-    if (!this.findBar.stepping) return;
-    this.findBar.stepping = false;
+    if (!this.findBar.stepping && !this.findBar.replaceStepping) return;
+    this.findBar.stepping = false; this.findBar.replaceStepping = false;
     cx.notify();
   }
 
@@ -1353,7 +1354,9 @@ export default class Explorer extends View {
         view.code.on("change", (_e, cx) => {
           view.markdown = null;
           if (this.views.get(view.rel) !== view) return;
-          this.endStepping(cx);
+          // Replace's own edit keeps its stepping; typing ends it.
+          const own = this.findBar.replaceStepping && view.code.value() === this.findBar.ownText;
+          if (!own) this.endStepping(cx);
           this.onEdit(view.rel, view, cx);
         });
         cx.notify();
@@ -2002,11 +2005,13 @@ export default class Explorer extends View {
       : view.picture ? div().flex_1().min_h(0).p(16).flex().items_center().justify_center().child(image(view.picture).max_w_full().max_h_full())
       : div().p(16).text_color(t.dim).child(view.message ?? "Loading…");
     return v_flex().id("explorer-editor").flex_1().min_w(0).h_full().min_h(0)
-      .key_context(this.findBar.open && this.findBar.stepping ? "ExplorerEditor FindStepping" : "ExplorerEditor")
+      .key_context(!this.findBar.open ? "ExplorerEditor" : this.findBar.stepping ? "ExplorerEditor FindStepping"
+        : this.findBar.replaceStepping ? "ExplorerEditor ReplaceStepping" : "ExplorerEditor")
       .on_action("explorer-find", (_e, cx) => this.showFind(cx))
       .on_action("explorer-replace", (_e, cx) => { if (this.activeEditable()) this.showFind(cx, true); })
       .on_action("explorer-save", (_e, cx) => { const rel = this.active; if (rel) cx.spawn(async cx => { await this.save(rel, cx); }); })
       .on_action("explorer-find-next", (_e, cx) => this.findBar.step(1, cx))
+      .on_action("explorer-replace-next", (_e, cx) => this.findBar.replaceOne(cx))
       .on_action("explorer-find-previous", (_e, cx) => this.findBar.step(-1, cx))
       // A click in the text ends find's stepping: Enter is a new line again.
       .on_mouse_down("left", (_e, cx) => this.endStepping(cx))

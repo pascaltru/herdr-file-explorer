@@ -119,12 +119,14 @@ folder (`git grep`) and Quick Open (`ctrl-e`, any file of the repository by name
     The bar is two columns, as VS Code's: the find and Replace boxes, one width (up to 340px), then
     the count, arrows and `×` beside the first and the buttons beside the second. `ctrl+h` with a
     query already there puts the keyboard in the Replace box; `ctrl+f` shows find alone.
-    - Replace (Enter in the box) types the replacement over the match shown, with
-      `EditorState.replace` (one undo step), then selects the next match after it; the keyboard
-      stays in the box, so that match isn't drawn (the editor draws a selection only while it has the
-      keyboard); the count says which it is. If no match is selected (a click or an edit moved on),
-      it first only shows the next match from the cursor, as VS Code does. Stepping's Enter binding
-      is switched off while the box has the keyboard.
+    - Replace (Enter in the box, or the button) types the replacement over the match shown, with
+      `EditorState.replace` (one undo step), then selects the next match after it and gives the
+      editor the keyboard, so that match is drawn (the editor draws a selection only while it has the
+      keyboard). Enter then replaces it in turn, as find's stepping does: a binding for
+      `ReplaceStepping > Input`, switched on by the editor area's `key_context`. A click in the text,
+      a typed edit (not Replace's own, recognized by the text it left) or either box taking the
+      keyboard ends it; letters typed meanwhile go into the file. If no match is selected (a click or
+      an edit moved on), Replace first only shows the next match from the cursor, as VS Code does.
     - Replace All (`ctrl+alt+enter` in the box) replaces every match, past the 10,000 shown, each
       typed over on its own as Replace does: `ctrl+z` undoes them one at a time, the last first, as
       it would typing (one edit for them all would have to retype the whole stretch between the first

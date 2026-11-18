@@ -104,17 +104,23 @@ export class FindBar {
     // After Enter or F3 the editor has the keyboard, and Enter keeps stepping (a binding the explorer
     // switches on with this) until a click or an edit in the file.
     this.stepping = false;
+    // After Replace, the same with the next match: the editor has the keyboard, so the match is
+    // drawn, and Enter replaces it (ReplaceStepping) until a click, a typed edit or a box takes over.
+    this.replaceStepping = false;
     this.input = InputState.new({ placeholder: "Find in file" });
     this.input.on("change", (_e, cx) => this.typed(cx));
     // Enter hands the editor the keyboard, so the match is drawn (in a read-only file, typeIntoBox
     // brings typing back here).
     this.input.on("submit", (e, cx) => this.step(e?.shift ? -1 : 1, cx));
-    this.input.on("focus", () => { this.boxFocused = true; });
+    this.input.on("focus", (_e, cx) => { this.boxFocused = true; if (this.replaceStepping) { this.replaceStepping = false; cx?.notify(); } });
     this.input.on("blur", () => { this.boxFocused = false; });
     this.replaceInput = InputState.new({ placeholder: "Replace" });
     this.replaceInput.on("submit", (_e, cx) => this.replaceOne(cx));
     // Stepping's Enter binding covers every input of the editor area: off while this box is used.
-    this.replaceInput.on("focus", (_e, cx) => { this.replaceFocused = true; if (this.stepping) { this.stepping = false; cx?.notify(); } });
+    this.replaceInput.on("focus", (_e, cx) => {
+      this.replaceFocused = true;
+      if (this.stepping || this.replaceStepping) { this.stepping = false; this.replaceStepping = false; cx?.notify(); }
+    });
     this.replaceInput.on("blur", () => { this.replaceFocused = false; });
   }
 
@@ -124,7 +130,7 @@ export class FindBar {
     if (!code) return false;
     const range = code.selected_range(), picked = range.end > range.start ? code.value().slice(range.start, range.end) : "";
     if (picked && !picked.includes("\n") && picked.length <= 200) this.input.set_value(this.regex ? escapeRegex(picked) : picked);
-    this.open = true; this.stepping = false; this.replaced = null;
+    this.open = true; this.stepping = false; this.replaceStepping = false; this.replaced = null;
     this.replacing = replace;
     this.find();
     this.index = this.firstFrom(range.start);
@@ -144,7 +150,7 @@ export class FindBar {
 
   // Closed: the file's text and editor aren't kept (up to 1 MB, and a released editor).
   forget() {
-    this.open = false; this.stepping = false; this.source = null; this.matches = []; this.index = -1;
+    this.open = false; this.stepping = false; this.replaceStepping = false; this.source = null; this.matches = []; this.index = -1;
   }
 
   focusInput() {
@@ -238,7 +244,7 @@ export class FindBar {
       if (i === -1) i = n - 1;
     }
     this.index = i;
-    this.stepping = focus;
+    this.stepping = focus; this.replaceStepping = false;
     this.explorer.showRange(code, this.matches[i][0], this.matches[i][1], focus, cx);
   }
 
@@ -266,7 +272,7 @@ export class FindBar {
     const current = shown && (this.explorer.revealing || (shown[0] === sel.start && shown[1] === sel.end));
     if (!current) {
       this.index = this.firstFrom(sel.start);
-      this.explorer.showRange(code, this.matches[this.index][0], this.matches[this.index][1], false, cx);
+      this.showForReplace(code, cx);
       return;
     }
     const [start, end] = shown, text = code.value(), value = this.replacement(text, start);
@@ -275,8 +281,16 @@ export class FindBar {
     this.find();
     // The next match after the replaced text (a replacement that matches again isn't replaced twice).
     this.index = this.firstFrom(start + value.length);
-    if (this.index !== -1) this.explorer.showRange(code, this.matches[this.index][0], this.matches[this.index][1], false, cx);
-    else cx.notify();
+    // The edit Replace just made, which mustn't end the stepping (see the explorer's change handler).
+    this.ownText = code.value();
+    if (this.index !== -1) this.showForReplace(code, cx);
+    else { this.replaceStepping = false; cx.notify(); }
+  }
+
+  // The match to replace next, selected and drawn: the editor takes the keyboard, and Enter replaces it.
+  showForReplace(code, cx) {
+    this.stepping = false; this.replaceStepping = true;
+    this.explorer.showRange(code, this.matches[this.index][0], this.matches[this.index][1], true, cx);
   }
 
   // Every match, each typed over on its own as Replace does: Ctrl+Z undoes them one at a time, the
